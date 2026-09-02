@@ -1,0 +1,8 @@
+# clasp: real project link and login token. Never commit these.
+.clasp.json
+.clasprc.json
+
+# Editor and OS noise
+.DS_Store
+node_modules/
+*.log

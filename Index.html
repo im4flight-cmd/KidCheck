@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #0f1116;
+      --card: #171a21;
+      --line: #262b36;
+      --text: #ffffff;
+      --muted: #8b93a3;
+      --accent: #4f9cf9;
+      --good: #35c46a;
+      --warn: #ffb020;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-text-size-adjust: 100%;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 20px 28px 12px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    h1 {
+      font-size: clamp(28px, 4.5vw, 44px);
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .count {
+      font-size: clamp(18px, 3vw, 26px);
+      font-weight: 600;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    main { flex: 1; padding: 8px 28px 20px; overflow: auto; }
+
+    .list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 10px;
+    }
+    .name {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 18px;
+      font-size: clamp(20px, 2.6vw, 30px);
+      font-weight: 600;
+      animation: pop 0.25s ease;
+    }
+    .avatar {
+      flex: 0 0 auto;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #041022;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .empty, .loading {
+      color: var(--muted);
+      font-size: clamp(20px, 3vw, 28px);
+      padding: 60px 8px;
+      text-align: center;
+    }
+
+    footer {
+      padding: 12px 28px 20px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .live {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--good);
+      box-shadow: 0 0 0 0 rgba(53, 196, 106, 0.6);
+      animation: pulse 2s infinite;
+    }
+    .status { color: var(--warn); }
+    .status:empty { display: none; }
+
+    @keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(53, 196, 106, 0.6); }
+      70%  { box-shadow: 0 0 0 12px rgba(53, 196, 106, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(53, 196, 106, 0); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="room">Checked In</h1>
+    <div class="count" id="count"></div>
+  </header>
+
+  <main>
+    <div class="list" id="list"><div class="loading">Loading&hellip;</div></div>
+  </main>
+
+  <footer>
+    <span class="live"><span class="dot"></span><span>Live, updates every <span id="secs"></span>s</span></span>
+    <span id="updated"></span>
+    <span class="status" id="status"></span>
+  </footer>
+
+  <script>
+    // These three values are validated server side before they reach here:
+    // eventId is digits only, occurrence is blank or a strict date pattern.
+    var EVENT_ID = <?!= JSON.stringify(eventId) ?>;
+    var OCCURRENCE = <?!= JSON.stringify(occurrence) ?>;
+    var REFRESH_MS = <?!= refreshMs ?>;
+
+    var lastGood = null;
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, function(c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    function firstLetter(s) {
+      s = String(s || '').trim();
+      return s ? s.charAt(0).toUpperCase() : '?';
+    }
+
+    function render(data) {
+      if (!data) { return; }
+      if (data.error) { showError(data.error); return; }
+
+      lastGood = data;
+      document.getElementById('status').textContent = '';
+
+      if (data.room) {
+        document.getElementById('room').textContent = data.room;
+        document.title = data.room;
+      }
+
+      var names = data.checked_in || [];
+      var count = document.getElementById('count');
+      count.textContent = names.length === 1 ? '1 checked in' : names.length + ' checked in';
+
+      var list = document.getElementById('list');
+      if (!names.length) {
+        list.innerHTML = '<div class="empty">No one checked in yet</div>';
+      } else {
+        list.innerHTML = names.map(function(n) {
+          return '<div class="name"><span class="avatar">' + esc(firstLetter(n)) +
+            '</span><span>' + esc(n) + '</span></div>';
+        }).join('');
+      }
+
+      document.getElementById('updated').textContent = data.updated ? 'Updated ' + data.updated : '';
+    }
+
+    function showError(msg) {
+      document.getElementById('status').textContent = '⚠ ' + msg;
+      // Keep the last good roster on screen through a brief hiccup. Only when
+      // we have never loaded anything do we replace the list with the error.
+      if (!lastGood) {
+        document.getElementById('list').innerHTML = '<div class="empty">' + esc(msg) + '</div>';
+      }
+    }
+
+    function refresh() {
+      google.script.run
+        .withSuccessHandler(render)
+        .withFailureHandler(function(err) {
+          showError((err && err.message) ? err.message : 'Connection problem, retrying.');
+        })
+        .getRoster(EVENT_ID, OCCURRENCE);
+    }
+
+    document.getElementById('secs').textContent = Math.round(REFRESH_MS / 1000);
+    refresh();
+    setInterval(refresh, REFRESH_MS);
+
+    // Refresh immediately when the iPad wakes or the tab becomes visible
+    // again, so a screen that was asleep is current the moment it is seen.
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) { refresh(); }
+    });
+  </script>
+</body>
+</html>
