@@ -1,8 +1,20 @@
-# clasp: real project link and login token. Never commit these.
+# Dependencies
+/node_modules
+
+# Next.js build output
+/.next
+/out
+next-env.d.ts
+
+# Env files (never commit real ChMS or Twilio credentials)
+.env
+.env*.local
+
+# clasp (legacy Apps Script tooling)
 .clasp.json
 .clasprc.json
 
 # Editor and OS noise
 .DS_Store
-node_modules/
 *.log
+/tsconfig.tsbuildinfo
