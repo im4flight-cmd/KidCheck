@@ -357,6 +357,47 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
   return parseAttendance(body, occ);
 }
 
+/**
+ * Temporary setup diagnostic: for one event, scan recent dates and report how
+ * many attendance records ChMS holds for each (counts only, never names), so a
+ * check-in filed under an unexpected occurrence date can be located.
+ */
+export async function diagnoseEventDates(
+  eventId: string,
+  days = 8,
+): Promise<Record<string, unknown>> {
+  const base = apiBase();
+  if (!base) return { configured: false };
+  if (!/^\d+$/.test(String(eventId))) return { configured: true, invalidEventId: String(eventId) };
+
+  const today = todayInChurchTz(); // YYYY-MM-DD
+  const [y, m, d] = today.split('-').map(Number);
+  const start = new Date(Date.UTC(y, m - 1, d, 12)); // noon UTC avoids day rollover
+
+  const results: Array<{ date: string; records: number; note: string }> = [];
+  for (let i = 0; i < days; i++) {
+    const day = new Date(start);
+    day.setUTCDate(start.getUTCDate() - i);
+    const date = day.toISOString().slice(0, 10);
+    const url =
+      `${base.url}?srv=attendance_profile&id=${encodeURIComponent(eventId)}` +
+      `&occurrence=${date}`;
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: `Basic ${base.auth}` },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
+      });
+      const body = await res.text();
+      const records = (body.match(/<attendee\b/gi) || []).length;
+      results.push({ date, records, note: /no attendance records/i.test(body) ? 'no records' : '' });
+    } catch {
+      results.push({ date, records: -1, note: 'fetch error' });
+    }
+  }
+  return { eventId, today, results };
+}
+
 async function fetchIndividualGuardian(childId: string): Promise<Guardian | null> {
   const base = apiBase();
   if (!base || !/^\d+$/.test(String(childId))) return null;
