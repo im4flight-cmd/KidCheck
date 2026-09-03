@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Attendee = { id: string; name: string; guardian?: string; phone?: string };
@@ -228,6 +229,7 @@ export default function RoomBoard({
       </main>
 
       <footer className="board-footer">
+        <Link href="/" className="rooms-link">‹ Rooms</Link>
         <span className={stale ? 'live stale' : 'live'}>
           <span className="dot" />
           {stale ? 'Reconnecting' : `Live, updates every ${Math.round(REFRESH_MS / 1000)}s`}
