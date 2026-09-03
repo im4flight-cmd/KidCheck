@@ -63,6 +63,18 @@ function capitalizeFirst(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
+function codePoint(n: number): string {
+  return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
+}
+
+// The XML parser already decodes the named entities (& < > ' "). Numeric
+// character references like &#225; are rarer but decoded here for safety.
+function decodeNumericEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, d) => codePoint(parseInt(d, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => codePoint(parseInt(h, 16)));
+}
+
 /**
  * Format a display name. Defaults to first name plus last initial ("Ben B.")
  * so a full last name is not left sitting on a classroom screen. Set
@@ -133,7 +145,7 @@ export function parseAttendance(xmlText: string, occurrence: string): RosterResu
     };
   }
 
-  const roomName = String(events[0].name ?? '').trim();
+  const roomName = decodeNumericEntities(String(events[0].name ?? '').trim());
   const occ = String(events[0].occurrence ?? '').trim() || occurrence;
 
   const seen = new Set<string>();
@@ -144,8 +156,8 @@ export function parseAttendance(xmlText: string, occurrence: string): RosterResu
       const id = a?.['@_id'] != null ? String(a['@_id']) : '';
       if (id && seen.has(id)) continue;
       if (id) seen.add(id);
-      const first = String(a?.first_name ?? '').trim();
-      const last = String(a?.last_name ?? '').trim();
+      const first = decodeNumericEntities(String(a?.first_name ?? '').trim());
+      const last = decodeNumericEntities(String(a?.last_name ?? '').trim());
       checkedIn.push({ id, name: formatName(first, last) });
     }
   }
@@ -191,9 +203,16 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
     res = await fetch(url, {
       headers: { Authorization: `Basic ${auth}` },
       cache: 'no-store',
+      // Fail fast rather than hang the serverless function if ChMS is slow.
+      signal: AbortSignal.timeout(10000),
     });
-  } catch {
-    return { error: 'Could not reach ChMS. Check the network and try again.' };
+  } catch (err) {
+    const timedOut = (err as { name?: string })?.name === 'TimeoutError';
+    return {
+      error: timedOut
+        ? 'ChMS did not respond in time. It will retry shortly.'
+        : 'Could not reach ChMS. Check the network and try again.',
+    };
   }
 
   if (res.status === 401 || res.status === 403) {
@@ -261,6 +280,8 @@ export async function getRoster(eventId: string, occurrence?: string): Promise<R
 
   const data = await fetchRoster(eventId, occ);
   if (!isError(data)) {
+    // Guard against unbounded growth in a long-lived warm instance.
+    if (cache.size > 500) cache.clear();
     cache.set(key, { at: Date.now(), data });
   }
   return data;

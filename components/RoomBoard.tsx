@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Attendee = { id: string; name: string };
 type Roster = {
@@ -13,6 +13,7 @@ type Roster = {
 };
 
 const REFRESH_MS = 20000;
+const FETCH_TIMEOUT_MS = 15000;
 
 function initialOf(name: string): string {
   const n = (name || '').trim();
@@ -28,47 +29,64 @@ function CheckMark() {
   );
 }
 
-export default function RoomBoard({ roomId, initialName }: { roomId: string; initialName: string }) {
+export default function RoomBoard({
+  roomId,
+  initialName,
+  occurrence = '',
+}: {
+  roomId: string;
+  initialName: string;
+  occurrence?: string;
+}) {
   const [roster, setRoster] = useState<Roster | null>(null);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
+  const inFlight = useRef(false);
+  const ctrlRef = useRef<AbortController | null>(null);
 
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      try {
-        const res = await fetch(`/api/roster?room=${encodeURIComponent(roomId)}`, {
-          cache: 'no-store',
-          signal,
-        });
-        const json = await res.json();
-        if (json && json.error) {
-          // Keep the last good roster on screen, note the problem quietly.
-          setStatus(String(json.error));
-        } else {
-          setRoster(json as Roster);
-          setStatus('');
-        }
-      } catch (err) {
-        if ((err as { name?: string })?.name === 'AbortError') return;
-        setStatus('Reconnecting…');
-      } finally {
-        setLoading(false);
+  const load = useCallback(async () => {
+    if (inFlight.current) return; // never let polls stack up
+    inFlight.current = true;
+    const ctrl = new AbortController();
+    ctrlRef.current = ctrl;
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const qs = occurrence ? `&occurrence=${encodeURIComponent(occurrence)}` : '';
+      const res = await fetch(`/api/roster?room=${encodeURIComponent(roomId)}${qs}`, {
+        cache: 'no-store',
+        signal: ctrl.signal,
+      });
+      const json = await res.json();
+      if (json && json.error) {
+        // Keep the last good roster on screen, note the problem quietly.
+        setStatus(String(json.error));
+      } else {
+        setRoster(json as Roster);
+        setStatus('');
       }
-    },
-    [roomId],
-  );
+    } catch (err) {
+      // An abort is either an unmount or our own timeout; stay quiet and let
+      // the next tick retry rather than flashing an error at people.
+      if ((err as { name?: string })?.name !== 'AbortError') {
+        setStatus('Reconnecting…');
+      }
+    } finally {
+      clearTimeout(timer);
+      inFlight.current = false;
+      setLoading(false);
+    }
+  }, [roomId, occurrence]);
 
   useEffect(() => {
-    const ctrl = new AbortController();
-    load(ctrl.signal);
-    const id = setInterval(() => load(), REFRESH_MS);
+    load();
+    const id = setInterval(load, REFRESH_MS);
     const onVisible = () => {
       if (!document.hidden) load();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
-      ctrl.abort();
       clearInterval(id);
+      ctrlRef.current?.abort();
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [load]);
@@ -100,7 +118,11 @@ export default function RoomBoard({ roomId, initialName }: { roomId: string; ini
         )}
       </header>
 
-      <main className="board-main">
+      <main
+        className="board-main"
+        aria-live="polite"
+        aria-label={`Children checked in at ${roomName}`}
+      >
         {loading && !roster ? (
           <div className="state">
             <div className="state-text">Loading&hellip;</div>
@@ -109,7 +131,9 @@ export default function RoomBoard({ roomId, initialName }: { roomId: string; ini
           <ul className="roster">
             {people.map((p) => (
               <li className="person" key={p.id || p.name}>
-                <span className="avatar">{initialOf(p.name)}</span>
+                <span className="avatar" aria-hidden="true">
+                  {initialOf(p.name)}
+                </span>
                 <span className="person-name">{p.name}</span>
               </li>
             ))}

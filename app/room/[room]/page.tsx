@@ -4,8 +4,15 @@ import { getRoom } from '@/lib/rooms';
 
 export const dynamic = 'force-dynamic';
 
-export default async function RoomPage({ params }: { params: Promise<{ room: string }> }) {
+export default async function RoomPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ room: string }>;
+  searchParams: Promise<{ occurrence?: string }>;
+}) {
   const { room } = await params;
+  const { occurrence } = await searchParams;
 
   if (!/^\d+$/.test(room)) {
     return (
@@ -26,5 +33,10 @@ export default async function RoomPage({ params }: { params: Promise<{ room: str
   }
 
   const configured = getRoom(room);
-  return <RoomBoard roomId={room} initialName={configured?.name ?? ''} />;
+  const occ =
+    typeof occurrence === 'string' &&
+    /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/.test(occurrence)
+      ? occurrence
+      : '';
+  return <RoomBoard roomId={room} initialName={configured?.name ?? ''} occurrence={occ} />;
 }

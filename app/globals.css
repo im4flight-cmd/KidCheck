@@ -65,6 +65,8 @@ body {
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
 }
 a {
   color: inherit;
@@ -77,6 +79,10 @@ a {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  /* Kiosk display: no accidental text selection or callouts on touch. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* ---- Display header ----------------------------------------------------- */

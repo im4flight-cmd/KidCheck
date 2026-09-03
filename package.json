@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "gen-icons": "node scripts/gen-icons.mjs"
+    "gen-icons": "node scripts/gen-icons.mjs",
+    "test": "node --test scripts/ccb.test.mts"
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.1",
@@ -22,5 +23,15 @@
     "@types/react-dom": "^19.0.0",
     "pngjs": "^7.0.0",
     "typescript": "^5.7.0"
-  }
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "browserslist": [
+    "iOS >= 14",
+    "Safari >= 14",
+    "last 3 Chrome versions",
+    "last 3 Firefox versions",
+    "last 3 Edge versions"
+  ]
 }
