@@ -428,7 +428,7 @@ export async function diagnoseEventOccurrences(
     return { eventId, status: 0, error: String((err as Error)?.message ?? err) };
   }
 
-  const errorMatch = body.match(/<error>([^<]*)<\/error>/i);
+  const errorMatch = body.match(/<error\b[^>]*>([^<]*)<\/error>/i);
   if (errorMatch) return { eventId, status, ccbError: errorMatch[1].trim() };
 
   // Pull every date, or date+time, looking string out of the raw XML.
@@ -447,6 +447,50 @@ export async function diagnoseEventOccurrences(
     name: nameTag ? nameTag[1].trim() : undefined,
     dateTimesFound: dateTimes,
     raw,
+  };
+}
+
+/**
+ * Temporary setup diagnostic: calls attendance_profile with NO occurrence
+ * parameter at all. CCB sometimes defaults an omitted occurrence to the
+ * event's current/next scheduled meeting, which can reveal a custom or
+ * one-off schedule occurrence without needing the event_profile permission.
+ * Counts and dates only, never names.
+ */
+export async function diagnoseNoOccurrence(eventId: string): Promise<Record<string, unknown>> {
+  const base = apiBase();
+  if (!base) return { configured: false };
+  if (!/^\d+$/.test(String(eventId))) return { configured: true, invalidEventId: String(eventId) };
+
+  const url = `${base.url}?srv=attendance_profile&id=${encodeURIComponent(eventId)}`;
+  let body: string;
+  let status: number;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Basic ${base.auth}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
+    });
+    status = res.status;
+    body = await res.text();
+  } catch (err) {
+    return { eventId, status: 0, error: String((err as Error)?.message ?? err) };
+  }
+
+  const errorMatch = body.match(/<error\b[^>]*>([^<]*)<\/error>/i);
+  if (errorMatch) return { eventId, status, ccbError: errorMatch[1].trim() };
+
+  const occTag = [...new Set(body.match(/<occurrence>([^<]*)<\/occurrence>/gi) ?? [])].map((s) =>
+    s.replace(/<\/?occurrence>/gi, ''),
+  );
+  const records = (body.match(/<attendee\b/gi) || []).length;
+
+  return {
+    eventId,
+    status,
+    occurrencesReturned: occTag,
+    records,
+    note: /no attendance records/i.test(body) ? 'no records' : '',
   };
 }
 

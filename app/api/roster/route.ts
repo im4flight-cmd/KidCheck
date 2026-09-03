@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRoster, diagnoseEventDates, diagnoseEventOccurrences } from '@/lib/ccb';
+import { getRoster, diagnoseEventDates, diagnoseEventOccurrences, diagnoseNoOccurrence } from '@/lib/ccb';
 
 // Always run fresh, never statically cached.
 export const dynamic = 'force-dynamic';
@@ -27,6 +27,12 @@ export async function GET(req: NextRequest) {
   // occurrences/schedule entries exist for the event (dates/times only).
   if (req.nextUrl.searchParams.get('debug') === '2') {
     const info = await diagnoseEventOccurrences(room);
+    return NextResponse.json(info, { headers: { 'Cache-Control': 'no-store' } });
+  }
+  // Temporary: /api/roster?room=<single event id>&debug=3 asks
+  // attendance_profile with NO occurrence, letting CCB pick its own default.
+  if (req.nextUrl.searchParams.get('debug') === '3') {
+    const info = await diagnoseNoOccurrence(room);
     return NextResponse.json(info, { headers: { 'Cache-Control': 'no-store' } });
   }
 
