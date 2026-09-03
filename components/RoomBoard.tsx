@@ -230,7 +230,7 @@ export default function RoomBoard({
         ) : roster ? (
           <div className="state">
             <CheckMark />
-            <div className="state-text">No one checked in yet</div>
+            <div className="state-text">No kids checked in at this time</div>
             <div className="state-sub">Names appear here the moment a child is checked into this room.</div>
           </div>
         ) : notConfigured ? (
@@ -252,7 +252,7 @@ export default function RoomBoard({
       </main>
 
       <footer className="board-footer">
-        <Link href="/" className="rooms-link">‹ Rooms</Link>
+        <Link href="/" className="rooms-link" aria-label="Back to the room list">‹ Back to rooms</Link>
         <span className={notConfigured ? 'live setup' : stale ? 'live stale' : 'live'}>
           <span className="dot" />
           {notConfigured

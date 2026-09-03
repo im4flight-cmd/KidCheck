@@ -48,6 +48,30 @@ test('surfaces a ChMS error message', () => {
   if (isError(r)) assert.match(r.error, /Invalid credentials/);
 });
 
+test('surfaces a ChMS error that carries attributes, never "[object Object]"', () => {
+  const r = parseAttendance(
+    xml('<errors><error type="attendance_profile">The service is not enabled for this API user.</error></errors>'),
+    '2026-09-07',
+  );
+  assert.ok(isError(r));
+  if (isError(r)) {
+    assert.doesNotMatch(r.error, /\[object Object\]/);
+    assert.match(r.error, /not enabled/);
+  }
+});
+
+test('surfaces a ChMS error given as a nested <message> element', () => {
+  const r = parseAttendance(
+    xml('<errors><error><type>1</type><message>Invalid password.</message></error></errors>'),
+    '2026-09-07',
+  );
+  assert.ok(isError(r));
+  if (isError(r)) {
+    assert.doesNotMatch(r.error, /\[object Object\]/);
+    assert.match(r.error, /Invalid password/);
+  }
+});
+
 test('empty room (no event) returns zero, not an error', () => {
   const r = parseAttendance(xml('<events count="0"></events>'), '2026-09-07');
   assert.ok(!isError(r));

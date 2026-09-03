@@ -102,6 +102,20 @@ function nodeText(v: unknown): string {
   return decodeNumericEntities(String(v).trim());
 }
 
+// A ChMS <error> node may be plain text, or an object when it carries
+// attributes (<error type="..">text</error>) or child elements
+// (<error><message>..</message></error>). Pull a readable string from any shape
+// so the display never shows a bare "[object Object]".
+function extractErrorMessage(node: unknown): string {
+  const direct = nodeText(node);
+  if (direct) return direct;
+  if (node && typeof node === 'object') {
+    const o = node as Record<string, unknown>;
+    return nodeText(o.message) || nodeText(o.error) || nodeText(o.description) || '';
+  }
+  return '';
+}
+
 /**
  * Format a display name. Defaults to first name plus last initial ("Ben B.")
  * so a full last name is not left sitting on a classroom screen. Set
@@ -171,7 +185,7 @@ export function parseAttendance(xmlText: string, occurrence: string): RosterResu
   // ChMS reports problems as <errors><error>...</error></errors>.
   if (response.errors) {
     const errs = toArray<any>(response.errors.error);
-    const msg = errs.length ? String(errs[0]).trim() : 'ChMS returned an error.';
+    const msg = errs.length ? extractErrorMessage(errs[0]) : '';
     return { error: msg || 'ChMS returned an error.' };
   }
 
