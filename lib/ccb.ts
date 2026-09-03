@@ -392,6 +392,8 @@ export async function diagnoseAttendance(
     hasErrorsNode: /<errors?\b/i.test(body),
     hasEventsNode: /<events\b/i.test(body),
     errorText: errorMatch ? errorMatch[1].trim().slice(0, 200) : '',
+    // Full reply is safe to surface only when it carries no attendee data.
+    raw: /<events\b/i.test(body) ? '(omitted: contains attendee data)' : body,
   };
 }
 
