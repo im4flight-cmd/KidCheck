@@ -13,6 +13,7 @@ import {
   normalizeOccurrence,
   isError,
   fetchRoster,
+  mergeRosters,
 } from '../lib/ccb.ts';
 import { toE164 } from '../lib/phone.ts';
 
@@ -117,6 +118,20 @@ test('preserves accented, punctuated, and ampersand names', () => {
 test('garbage input is a clean error, not a crash', () => {
   const r = parseAttendance('not xml at all <<<', '2026-09-07');
   assert.ok(isError(r));
+});
+
+test('mergeRosters combines events, dedupes shared children, sorts by name', () => {
+  const roomA = {
+    room: '', occurrence: '2026-09-07', updated: '', count: 2,
+    checkedIn: [{ id: '1', name: 'Zoe A.' }, { id: '2', name: 'Ben B.' }],
+  };
+  const roomB = {
+    room: '', occurrence: '2026-09-07', updated: '', count: 2,
+    checkedIn: [{ id: '2', name: 'Ben B.' }, { id: '3', name: 'Max C.' }],
+  };
+  const merged = mergeRosters([roomA, roomB], '2026-09-07');
+  assert.equal(merged.count, 3); // id "2" is in both events, counted once
+  assert.deepEqual(merged.checkedIn.map((a) => a.name), ['Ben B.', 'Max C.', 'Zoe A.']);
 });
 
 test('formatName basics', () => {

@@ -12,6 +12,9 @@
 
 import roomsJson from '@/rooms.json';
 
+// `id` is the room's canonical key: one ChMS event id, or several joined by
+// commas for a combined room (e.g. "125,114,115" shows all three age classes on
+// one screen).
 export type Room = { id: string; name: string };
 
 function clean(list: unknown): Room[] {
@@ -19,10 +22,14 @@ function clean(list: unknown): Room[] {
   return list
     .map((r) => {
       if (!r || typeof r !== 'object') return null;
-      const id = String((r as any).id ?? '').trim();
-      const name = String((r as any).name ?? '').trim();
-      if (!/^\d+$/.test(id) || !name) return null;
-      return { id, name };
+      const rec = r as { id?: unknown; ids?: unknown; name?: unknown };
+      // Accept either an `ids` array or an `id` string with one or more
+      // comma-separated event ids. Keep only well-formed numeric ids.
+      const parts = Array.isArray(rec.ids) ? rec.ids : String(rec.id ?? '').split(',');
+      const ids = parts.map((x) => String(x).trim()).filter((x) => /^\d+$/.test(x));
+      const name = String(rec.name ?? '').trim();
+      if (!ids.length || !name) return null;
+      return { id: ids.join(','), name };
     })
     .filter((r): r is Room => r !== null);
 }

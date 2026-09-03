@@ -9,7 +9,8 @@ export async function GET(req: NextRequest) {
   const room = req.nextUrl.searchParams.get('room') ?? '';
   const occurrence = req.nextUrl.searchParams.get('occurrence') ?? '';
 
-  if (!/^\d+$/.test(room)) {
+  // One event id, or several comma-separated for a combined room.
+  if (!/^\d+(,\d+)*$/.test(room)) {
     return NextResponse.json(
       { error: 'Missing or invalid room id.' },
       { status: 400, headers: { 'Cache-Control': 'no-store' } },

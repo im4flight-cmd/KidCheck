@@ -24,7 +24,7 @@ export default function HomePage() {
       {rooms.length > 0 ? (
         <div className="room-grid">
           {rooms.map((room) => (
-            <Link key={room.id} className="room-card" href={`/room/${room.id}`}>
+            <Link key={room.id} className="room-card" href={`/room/${encodeURIComponent(room.id)}`}>
               <span>
                 <span className="rc-open">Open display</span>
                 <br />

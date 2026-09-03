@@ -15,7 +15,7 @@ export default async function RoomPage({
   const { room } = await params;
   const { occurrence } = await searchParams;
 
-  if (!/^\d+$/.test(room)) {
+  if (!/^\d+(,\d+)*$/.test(room)) {
     return (
       <main className="picker">
         {/* eslint-disable-next-line @next/next/no-img-element */}

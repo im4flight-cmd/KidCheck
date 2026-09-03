@@ -459,9 +459,7 @@ function demoRoster(eventId: string, occ: string): RosterOk {
   };
 }
 
-export async function getRoster(eventId: string, occurrence?: string): Promise<RosterResult> {
-  const occ = normalizeOccurrence(occurrence);
-
+async function getSingleRoster(eventId: string, occ: string): Promise<RosterResult> {
   // Preview without ChMS. Off unless DEMO_MODE=true.
   if (process.env.DEMO_MODE === 'true') {
     return demoRoster(eventId, occ);
@@ -482,4 +480,53 @@ export async function getRoster(eventId: string, occurrence?: string): Promise<R
     cache.set(key, { at: Date.now(), data });
   }
   return data;
+}
+
+/**
+ * Merge several event rosters into one combined room, deduping children who
+ * appear in more than one and sorting by name.
+ */
+export function mergeRosters(rosters: RosterOk[], occurrence: string): RosterOk {
+  const seen = new Set<string>();
+  const checkedIn: Attendee[] = [];
+  for (const r of rosters) {
+    for (const a of r.checkedIn) {
+      const key = a.id || a.name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      checkedIn.push(a);
+    }
+  }
+  checkedIn.sort((x, y) => x.name.localeCompare(y.name));
+  return {
+    room: '',
+    occurrence,
+    updated: new Date().toISOString(),
+    count: checkedIn.length,
+    checkedIn,
+  };
+}
+
+/**
+ * Roster for one room. `roomParam` is a single event id, or several joined by
+ * commas for a combined room, in which case their check-ins are merged.
+ */
+export async function getRoster(roomParam: string, occurrence?: string): Promise<RosterResult> {
+  const occ = normalizeOccurrence(occurrence);
+  const ids = String(roomParam)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (ids.length <= 1) {
+    return getSingleRoster(ids[0] ?? String(roomParam), occ);
+  }
+
+  const results = await Promise.all(ids.map((id) => getSingleRoster(id, occ)));
+  const oks = results.filter((r): r is RosterOk => !isError(r));
+  if (!oks.length) {
+    // Every combined event errored (e.g. bad credentials); surface the first.
+    return (results.find((r) => isError(r)) as RosterError) ?? { error: 'ChMS returned an error.' };
+  }
+  return mergeRosters(oks, occ);
 }

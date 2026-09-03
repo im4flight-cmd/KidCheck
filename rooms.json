@@ -1,13 +1,7 @@
 [
-  { "id": "103", "name": "Nursery" },
-  { "id": "125", "name": "3 Year Olds" },
-  { "id": "114", "name": "4 Year Olds" },
-  { "id": "115", "name": "5 Year Olds" },
-  { "id": "116", "name": "Kindergarten" },
-  { "id": "117", "name": "1st Grade Class" },
-  { "id": "118", "name": "2nd Grade Class" },
-  { "id": "112", "name": "3rd Grade Class" },
-  { "id": "119", "name": "4th Grade Class" },
-  { "id": "120", "name": "5th Grade Class" },
-  { "id": "121", "name": "6th Grade Class" }
+  { "ids": ["103"], "name": "Nursery" },
+  { "ids": ["125", "114", "115"], "name": "3-5 Year Olds" },
+  { "ids": ["116", "117"], "name": "K-1st Grade" },
+  { "ids": ["118", "112", "119"], "name": "2nd-4th Grade" },
+  { "ids": ["120", "121"], "name": "5th-6th Grade" }
 ]

@@ -121,6 +121,20 @@ Two ways, whichever is easier. The `ROOMS` variable wins when set.
 The `id` is the room's ChMS event id, the number in the event URL inside ChMS.
 It is set once per room and does not change week to week.
 
+### Combining several classes into one display
+
+To show more than one ChMS event on a single screen (for example, the 3, 4, and
+5 year old classes sharing one room), give that room an `ids` array instead of a
+single `id`. Its display merges the check-ins from every listed event and
+removes any duplicates:
+
+```json
+[
+  { "id": "103", "name": "Nursery" },
+  { "ids": ["125", "114", "115"], "name": "3-5 Year Olds" }
+]
+```
+
 ## Set up an iPad
 
 1. Open the room's display URL in Safari, for example

@@ -1,5 +1,5 @@
 [
   { "id": "12345", "name": "Nursery" },
   { "id": "12346", "name": "Preschool" },
-  { "id": "12347", "name": "Elementary" }
+  { "ids": ["12347", "12348", "12349"], "name": "Elementary" }
 ]
