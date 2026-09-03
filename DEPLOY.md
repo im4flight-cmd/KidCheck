@@ -65,6 +65,14 @@ When your admin gives you the three ChMS values, come back to the Vercel project
    | `CCB_API_USER` | the ChMS API username |
    | `CCB_API_PASS` | the ChMS API password |
 
+   The chart also shows each child's parent name and phone, pulled from CCB, so
+   a teacher can reach out from the church phone. Two things for that:
+   - When your admin sets up the API user, make sure both **`attendance_profile`**
+     and **`individual_profile`** services are checked.
+   - Those phone numbers show on the classroom screen. That is on by default. If
+     you would rather show only the parent's name, or nothing, add
+     `PARENT_CONTACT_MODE` set to `name` or `off`.
+
 4. Update `ROOMS` with your real rooms. Each room needs a name and its ChMS
    **event id** (the number in the event's URL inside ChMS). For example:
    `[{"id":"48211","name":"Nursery"},{"id":"48212","name":"Preschool"}]`.

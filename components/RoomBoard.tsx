@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-type Attendee = { id: string; name: string };
+type Attendee = { id: string; name: string; guardian?: string; phone?: string };
 type Roster = {
   room: string;
   occurrence: string;
@@ -134,7 +134,16 @@ export default function RoomBoard({
                 <span className="avatar" aria-hidden="true">
                   {initialOf(p.name)}
                 </span>
-                <span className="person-name">{p.name}</span>
+                <span className="person-text">
+                  <span className="person-name">{p.name}</span>
+                  {(p.guardian || p.phone) && (
+                    <span className="person-contact">
+                      {p.guardian}
+                      {p.guardian && p.phone ? ' · ' : ''}
+                      {p.phone && <span className="contact-phone">{p.phone}</span>}
+                    </span>
+                  )}
+                </span>
               </li>
             ))}
           </ul>

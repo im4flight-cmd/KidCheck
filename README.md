@@ -66,8 +66,23 @@ Cloudflare Pages.
 | `CCB_API_PASS` | yes | ChMS API password. |
 | `CHURCH_TIMEZONE` | no | Defaults to `America/Chicago`. |
 | `SHOW_FULL_NAMES` | no | `true` shows full last names instead of "Ben B.". |
+| `PARENT_CONTACT_MODE` | no | `full` (default) shows parent name and phone, `name` shows the parent name only, `off` shows neither. |
 | `ROOMS` | no | Room list as JSON. Overrides `rooms.json` when set. |
 | `DEMO_MODE` | no | `true` serves sample data instead of calling ChMS. |
+
+### Parent contact on the chart
+
+Each child's card can show the parent/guardian to reach, pulled live from CCB
+(the family's primary contact and their best phone, preferring a mobile). CCB
+has no API to send a text, so this surfaces who to contact and a teacher texts
+or calls them from the church's own phone (for example UniFi Talk). Two setup
+notes:
+
+- The API user needs the **`individual_profile`** service enabled in ChMS, in
+  addition to `attendance_profile`.
+- Parent phone numbers on a room-visible screen are sensitive. Default is
+  `full`; set `PARENT_CONTACT_MODE=name` or `off` to dial that back. Lookups are
+  cached for hours, so this adds almost no API load.
 
 ## Configuring classrooms
 

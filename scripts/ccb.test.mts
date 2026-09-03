@@ -6,7 +6,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseAttendance,
+  parseIndividualGuardian,
   formatName,
+  formatPhone,
   isValidOccurrence,
   normalizeOccurrence,
   isError,
@@ -91,4 +93,36 @@ test('occurrence validation and normalization', () => {
   assert.equal(isValidOccurrence('tomorrow'), false);
   assert.equal(normalizeOccurrence('2026-09-07'), '2026-09-07');
   assert.match(normalizeOccurrence('junk'), /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('formatPhone normalizes US numbers, leaves oddities alone', () => {
+  assert.equal(formatPhone('2105550142'), '(210) 555-0142');
+  assert.equal(formatPhone('12105550142'), '(210) 555-0142');
+  assert.equal(formatPhone('210-555-0142'), '(210) 555-0142');
+  assert.equal(formatPhone('ext 5'), 'ext 5');
+});
+
+test('parseIndividualGuardian picks the primary contact and best phone', () => {
+  const body = `<?xml version="1.0"?><ccb_api><response><individuals count="1"><individual id="122">
+    <first_name>Ben</first_name><last_name>Bolton</last_name>
+    <phones>
+      <phone type="home">210-555-0101</phone>
+      <phone type="mobile">2105550142</phone>
+    </phones>
+    <family_members>
+      <family_member id="120"><first_name>Sarah</first_name><last_name>Bolton</last_name><family_position>Primary Contact</family_position></family_member>
+      <family_member id="121"><first_name>Mark</first_name><last_name>Bolton</last_name><family_position>Spouse</family_position></family_member>
+      <family_member id="122"><first_name>Ben</first_name><last_name>Bolton</last_name><family_position>Child</family_position></family_member>
+    </family_members>
+  </individual></individuals></response></ccb_api>`;
+  const g = parseIndividualGuardian(body);
+  assert.ok(g);
+  assert.equal(g!.guardian, 'Sarah B.'); // primary contact
+  assert.equal(g!.phone, '(210) 555-0142'); // mobile preferred over home
+});
+
+test('parseIndividualGuardian returns null when nothing is usable', () => {
+  const body = `<ccb_api><response><individuals count="1"><individual id="9">
+    <first_name>Sam</first_name><last_name>Ng</last_name></individual></individuals></response></ccb_api>`;
+  assert.equal(parseIndividualGuardian(body), null);
 });
