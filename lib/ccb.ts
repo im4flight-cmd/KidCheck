@@ -316,7 +316,7 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
       headers: { Authorization: `Basic ${base.auth}` },
       cache: 'no-store',
       // Fail fast rather than hang the serverless function if ChMS is slow.
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
     });
   } catch (err) {
     const timedOut = (err as { name?: string })?.name === 'TimeoutError';
@@ -406,6 +406,11 @@ async function enrichWithGuardians(roster: RosterOk): Promise<void> {
 // from one iPad, do not each hit ChMS. Lives only inside a warm serverless
 // instance, which is exactly the burst we want to smooth out.
 const CACHE_TTL_MS = 15000;
+// Fail fast rather than hang the serverless function if ChMS is slow.
+const CCB_TIMEOUT_MS = 10000;
+// Cap the number of cached room/occurrence entries so a long-lived warm
+// instance cannot grow the map without bound.
+const CACHE_MAX = 500;
 const cache = new Map<string, { at: number; data: RosterOk }>();
 
 // Sample data for DEMO_MODE, so the display can be previewed before ChMS
@@ -460,7 +465,7 @@ export async function getRoster(eventId: string, occurrence?: string): Promise<R
   if (!isError(data)) {
     await enrichWithGuardians(data);
     // Guard against unbounded growth in a long-lived warm instance.
-    if (cache.size > 500) cache.clear();
+    if (cache.size > CACHE_MAX) cache.clear();
     cache.set(key, { at: Date.now(), data });
   }
   return data;

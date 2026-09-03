@@ -2,6 +2,7 @@
   "name": "kidcheck",
   "version": "1.0.0",
   "private": true,
+  "license": "UNLICENSED",
   "description": "Live per-classroom check-in roster display for Country Faith Church, backed by Pushpay ChMS.",
   "scripts": {
     "dev": "next dev",

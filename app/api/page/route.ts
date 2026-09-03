@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const childId = String(payload?.childId ?? '');
   const pin = String(payload?.pin ?? '');
 
-  const result = await sendPage(childId, room, pin);
+  const pageResult = await sendPage(childId, room, pin);
   // Always 200; the client reads `error` vs `ok` from the body.
-  return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json(pageResult, { headers: { 'Cache-Control': 'no-store' } });
 }

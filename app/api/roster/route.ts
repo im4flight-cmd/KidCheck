@@ -16,6 +16,12 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const data = await getRoster(room, occurrence);
-  return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
+  const roster = await getRoster(room, occurrence);
+  return NextResponse.json(roster, {
+    headers: {
+      'Cache-Control': 'no-store',
+      // Lets the display detect when a newer version has been deployed.
+      'X-Build-Id': process.env.NEXT_PUBLIC_BUILD_ID ?? '',
+    },
+  });
 }

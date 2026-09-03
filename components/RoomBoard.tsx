@@ -15,7 +15,13 @@ type Roster = {
 
 const REFRESH_MS = 20000;
 const FETCH_TIMEOUT_MS = 15000;
+const TOAST_MS = 5000;
 const PIN_KEY = 'cfc_page_pin';
+
+// The version this page was served as. Baked in at build time; compared against
+// the server's current build on each poll so a kiosk reloads itself after a
+// deploy instead of waiting for someone to manually refresh every iPad.
+const BOOT_BUILD = process.env.NEXT_PUBLIC_BUILD_ID ?? '';
 
 function initialOf(name: string): string {
   const n = (name || '').trim();
@@ -57,6 +63,7 @@ export default function RoomBoard({
   const [loading, setLoading] = useState(true);
   const inFlight = useRef(false);
   const ctrlRef = useRef<AbortController | null>(null);
+  const pageOpenRef = useRef(false);
 
   // Paging state
   const [pageTarget, setPageTarget] = useState<Attendee | null>(null);
@@ -74,6 +81,11 @@ export default function RoomBoard({
     }
   }, []);
 
+  // Track whether a paging modal is open so an auto-reload never interrupts it.
+  useEffect(() => {
+    pageOpenRef.current = pageTarget !== null;
+  }, [pageTarget]);
+
   const load = useCallback(async () => {
     if (inFlight.current) return; // never let polls stack up
     inFlight.current = true;
@@ -86,6 +98,14 @@ export default function RoomBoard({
         cache: 'no-store',
         signal: ctrl.signal,
       });
+      // A newer version has been deployed: reload to pick it up, but never in
+      // the middle of a staff paging action. After the reload the ids match, so
+      // this fires once per deploy, not in a loop.
+      const build = res.headers.get('x-build-id');
+      if (build && BOOT_BUILD && build !== BOOT_BUILD && !pageOpenRef.current) {
+        window.location.reload();
+        return;
+      }
       const json = await res.json();
       if (json && json.error) {
         setStatus(String(json.error));
@@ -161,7 +181,7 @@ export default function RoomBoard({
             : `Text sent to ${who}`;
         setToast({ text, kind: json.dryRun ? 'test' : 'ok' });
         setPageTarget(null);
-        window.setTimeout(() => setToast(null), 5000);
+        window.setTimeout(() => setToast(null), TOAST_MS);
       }
     } catch {
       setPageError('Could not reach the text service.');
