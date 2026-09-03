@@ -164,6 +164,11 @@ a {
   padding: 0;
   list-style: none;
 }
+/* Wider cards when the "Text parent" button shares the row, so the phone
+   number is never truncated. */
+.roster.has-paging {
+  grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));
+}
 .person {
   display: flex;
   align-items: center;
@@ -414,4 +419,144 @@ a {
   .live .dot {
     animation: none;
   }
+}
+
+/* ---- Parent paging ------------------------------------------------------ */
+.page-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: center;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  background: transparent;
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.page-btn:hover,
+.page-btn:focus-visible {
+  background: var(--gold);
+  color: #1a1204;
+  outline: none;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 16, 28, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+}
+.modal {
+  width: min(440px, 92vw);
+  background: #16283d;
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  padding: 26px 26px 22px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.modal h2 {
+  font-family: 'Lora', Georgia, serif;
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+.modal-sub {
+  color: var(--muted);
+  margin: 0 0 18px;
+  line-height: 1.5;
+  font-size: 16px;
+}
+.modal-sub strong {
+  color: var(--text);
+}
+.pin-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+.pin-input {
+  font-family: inherit;
+  font-size: 22px;
+  letter-spacing: 0.3em;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--card-border);
+  background: rgba(8, 16, 28, 0.6);
+  color: var(--text);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pin-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.modal-error {
+  color: #ff9b7a;
+  font-weight: 600;
+  margin-top: 12px;
+  font-size: 15px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 22px;
+}
+.btn {
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 12px 22px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn-ghost {
+  background: transparent;
+  border-color: var(--card-border);
+  color: var(--text);
+}
+.btn-gold {
+  background: var(--gold);
+  color: #1a1204;
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  padding: 14px 24px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 16px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  z-index: 60;
+  animation: pop 0.2s ease both;
+}
+.toast-ok {
+  background: #2f9e57;
+  color: #ffffff;
+}
+.toast-test {
+  background: var(--gold);
+  color: #1a1204;
 }

@@ -13,6 +13,7 @@ import {
   normalizeOccurrence,
   isError,
 } from '../lib/ccb.ts';
+import { toE164 } from '../lib/phone.ts';
 
 const xml = (body: string) =>
   `<?xml version="1.0" encoding="UTF-8"?><ccb_api><response>${body}</response></ccb_api>`;
@@ -125,4 +126,12 @@ test('parseIndividualGuardian returns null when nothing is usable', () => {
   const body = `<ccb_api><response><individuals count="1"><individual id="9">
     <first_name>Sam</first_name><last_name>Ng</last_name></individual></individuals></response></ccb_api>`;
   assert.equal(parseIndividualGuardian(body), null);
+});
+
+test('toE164 normalizes US numbers and passes international through', () => {
+  assert.equal(toE164('(210) 555-0142'), '+12105550142');
+  assert.equal(toE164('2105550142'), '+12105550142');
+  assert.equal(toE164('1-210-555-0142'), '+12105550142');
+  assert.equal(toE164('+44 20 7946 0958'), '+442079460958');
+  assert.equal(toE164(''), '');
 });

@@ -347,7 +347,7 @@ async function fetchIndividualGuardian(childId: string): Promise<Guardian | null
 const GUARDIAN_TTL_MS = 6 * 60 * 60 * 1000;
 const guardianCache = new Map<string, { at: number; data: Guardian | null }>();
 
-async function fetchGuardian(childId: string): Promise<Guardian | null> {
+export async function fetchGuardian(childId: string): Promise<Guardian | null> {
   const hit = guardianCache.get(childId);
   if (hit && Date.now() - hit.at < GUARDIAN_TTL_MS) return hit.data;
 

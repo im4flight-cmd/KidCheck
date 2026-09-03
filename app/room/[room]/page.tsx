@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import RoomBoard from '@/components/RoomBoard';
 import { getRoom } from '@/lib/rooms';
+import { pagingEnabled } from '@/lib/paging';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,5 +39,12 @@ export default async function RoomPage({
     /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/.test(occurrence)
       ? occurrence
       : '';
-  return <RoomBoard roomId={room} initialName={configured?.name ?? ''} occurrence={occ} />;
+  return (
+    <RoomBoard
+      roomId={room}
+      initialName={configured?.name ?? ''}
+      occurrence={occ}
+      paging={pagingEnabled()}
+    />
+  );
 }

@@ -14,6 +14,7 @@ type Roster = {
 
 const REFRESH_MS = 20000;
 const FETCH_TIMEOUT_MS = 15000;
+const PIN_KEY = 'cfc_page_pin';
 
 function initialOf(name: string): string {
   const n = (name || '').trim();
@@ -33,16 +34,34 @@ export default function RoomBoard({
   roomId,
   initialName,
   occurrence = '',
+  paging = false,
 }: {
   roomId: string;
   initialName: string;
   occurrence?: string;
+  paging?: boolean;
 }) {
   const [roster, setRoster] = useState<Roster | null>(null);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const inFlight = useRef(false);
   const ctrlRef = useRef<AbortController | null>(null);
+
+  // Paging state
+  const [pageTarget, setPageTarget] = useState<Attendee | null>(null);
+  const [pin, setPin] = useState('');
+  const [sending, setSending] = useState(false);
+  const [pageError, setPageError] = useState('');
+  const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'test' } | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(PIN_KEY);
+      if (saved) setPin(saved);
+    } catch {
+      /* private mode, ignore */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (inFlight.current) return; // never let polls stack up
@@ -58,15 +77,12 @@ export default function RoomBoard({
       });
       const json = await res.json();
       if (json && json.error) {
-        // Keep the last good roster on screen, note the problem quietly.
         setStatus(String(json.error));
       } else {
         setRoster(json as Roster);
         setStatus('');
       }
     } catch (err) {
-      // An abort is either an unmount or our own timeout; stay quiet and let
-      // the next tick retry rather than flashing an error at people.
       if ((err as { name?: string })?.name !== 'AbortError') {
         setStatus('Reconnecting…');
       }
@@ -99,6 +115,47 @@ export default function RoomBoard({
     : '';
   const stale = status !== '';
 
+  function openPage(p: Attendee) {
+    setPageError('');
+    setPageTarget(p);
+  }
+
+  async function sendPage() {
+    if (!pageTarget) return;
+    setSending(true);
+    setPageError('');
+    try {
+      const res = await fetch('/api/page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: roomName, childId: pageTarget.id, pin }),
+      });
+      const json = await res.json();
+      if (json?.error) {
+        setPageError(String(json.error));
+      } else {
+        try {
+          localStorage.setItem(PIN_KEY, pin);
+        } catch {
+          /* ignore */
+        }
+        const who = json.guardian || 'the parent';
+        const text = json.throttled
+          ? `Already texted ${who} a moment ago`
+          : json.dryRun
+            ? `Test only: would text ${who} at ${json.toMasked}`
+            : `Text sent to ${who}`;
+        setToast({ text, kind: json.dryRun ? 'test' : 'ok' });
+        setPageTarget(null);
+        window.setTimeout(() => setToast(null), 5000);
+      }
+    } catch {
+      setPageError('Could not reach the text service.');
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <div className="screen">
       <header className="board-header">
@@ -128,7 +185,7 @@ export default function RoomBoard({
             <div className="state-text">Loading&hellip;</div>
           </div>
         ) : people.length > 0 ? (
-          <ul className="roster">
+          <ul className={paging ? 'roster has-paging' : 'roster'}>
             {people.map((p) => (
               <li className="person" key={p.id || p.name}>
                 <span className="avatar" aria-hidden="true">
@@ -144,6 +201,15 @@ export default function RoomBoard({
                     </span>
                   )}
                 </span>
+                {paging && (
+                  <button
+                    className="page-btn"
+                    onClick={() => openPage(p)}
+                    aria-label={`Text ${p.name}'s parent`}
+                  >
+                    Text parent
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -169,6 +235,41 @@ export default function RoomBoard({
         <span className="updated">{updated ? `Updated ${updated}` : ''}</span>
         <span className="status">{stale ? status : ''}</span>
       </footer>
+
+      {pageTarget && (
+        <div className="modal-overlay" onClick={() => !sending && setPageTarget(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Text a parent</h2>
+            <p className="modal-sub">
+              Send a text asking <strong>{pageTarget.guardian || 'the parent'}</strong> to come to{' '}
+              <strong>{roomName}</strong> for <strong>{pageTarget.name}</strong>?
+            </p>
+            <label className="pin-label">
+              Staff PIN
+              <input
+                className="pin-input"
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                autoFocus
+              />
+            </label>
+            {pageError && <div className="modal-error">{pageError}</div>}
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setPageTarget(null)} disabled={sending}>
+                Cancel
+              </button>
+              <button className="btn btn-gold" onClick={sendPage} disabled={sending || !pin}>
+                {sending ? 'Sending…' : 'Send text'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <div className={`toast toast-${toast.kind}`}>{toast.text}</div>}
     </div>
   );
 }

@@ -67,6 +67,12 @@ Cloudflare Pages.
 | `CHURCH_TIMEZONE` | no | Defaults to `America/Chicago`. |
 | `SHOW_FULL_NAMES` | no | `true` shows full last names instead of "Ben B.". |
 | `PARENT_CONTACT_MODE` | no | `full` (default) shows parent name and phone, `name` shows the parent name only, `off` shows neither. |
+| `PAGING_ENABLED` | no | `true` adds the "Text parent" button. Off by default. |
+| `PAGE_PIN` | no | Staff PIN required before a text sends. |
+| `CLEARSTREAM_API_KEY` | no | Clearstream API key. Present = real texts; blank = test mode. |
+| `PAGING_TEST` | no | `true` forces test mode even with a key set. |
+| `PAGE_SENDER` | no | Sender label on the text (default "Country Faith Church"). |
+| `PAGE_MESSAGE` | no | Message body. `{room}` is replaced with the room name. |
 | `ROOMS` | no | Room list as JSON. Overrides `rooms.json` when set. |
 | `DEMO_MODE` | no | `true` serves sample data instead of calling ChMS. |
 
@@ -83,6 +89,26 @@ notes:
 - Parent phone numbers on a room-visible screen are sensitive. Default is
   `full`; set `PARENT_CONTACT_MODE=name` or `off` to dial that back. Lookups are
   cached for hours, so this adds almost no API load.
+
+### Parent paging (optional, via Clearstream)
+
+CCB has no API to send a text, so paging routes through Clearstream (the church
+texting service), which the church already uses and which handles carrier
+compliance. A teacher taps "Text parent" on a child, confirms, and the server
+looks up that child's guardian phone from CCB and sends a one-off text through
+Clearstream. It is off until you set `PAGING_ENABLED=true`.
+
+- Set `PAGING_ENABLED=true`, a `PAGE_PIN`, and `CLEARSTREAM_API_KEY` (Clearstream:
+  Settings > API Keys, requires their paid plan).
+- Until a key is present, or with `PAGING_TEST=true`, the button runs in test
+  mode: it shows what it would send and logs it, but sends nothing. Try it that
+  way first, then add the key.
+- The send hits `POST https://api.getclearstream.com/v1/messages` with the
+  `X-Api-Key` header and `message_header`/`message_body`/`to` fields. Confirm the
+  first real send reaches a staff phone; Clearstream's response is logged if it
+  rejects anything.
+- Safety: PIN gated, a deliberate confirm step, phone numbers are masked in the
+  UI, and a 60 second guard prevents double texting the same child.
 
 ## Configuring classrooms
 

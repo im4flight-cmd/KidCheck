@@ -85,6 +85,21 @@ That is it. The link now shows live check-ins.
 
 ---
 
+## Optional: turn on "Text parent" (Clearstream)
+
+This adds a button on each child so a teacher can text that child's parent. It
+sends through Clearstream (which you already have), using the parent number from
+CCB. It stays off until you turn it on. In the Vercel Environment Variables:
+
+1. Add `PAGING_ENABLED` = `true`.
+2. Add `PAGE_PIN` = a number your team will use (for example `1234`).
+3. Try it first in test mode: leave `CLEARSTREAM_API_KEY` blank (or add
+   `PAGING_TEST` = `true`). The button will show exactly what it would send but
+   send nothing.
+4. When you are ready to go live, add `CLEARSTREAM_API_KEY` = your Clearstream
+   key (Clearstream: Settings > API Keys), remove `PAGING_TEST`, and redeploy.
+5. Send one real test to a staff phone before using it on a Sunday.
+
 ## Then, on each classroom iPad
 
 1. Open the room's link in Safari, for example
