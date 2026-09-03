@@ -78,6 +78,18 @@ test('empty room (no event) returns zero, not an error', () => {
   if (!isError(r)) assert.equal(r.count, 0);
 });
 
+test('a "no attendance records" message is an empty room, not an error', () => {
+  // ChMS returns this shape (no <response>, a <messages> note) when nobody is
+  // checked into the event/occurrence yet.
+  const body = `<?xml version="1.0" encoding="UTF-8"?><ccb_api>
+    <request><parameters></parameters></request>
+    <messages count="1"><message>There are no attendance records for the event id:103 and occurrence:2026-09-03.</message></messages>
+  </ccb_api>`;
+  const r = parseAttendance(body, '2026-09-03');
+  assert.ok(!isError(r));
+  if (!isError(r)) assert.equal(r.count, 0);
+});
+
 test('handles a single attendee that is not an array', () => {
   const body = xml(`<events><event id="5"><name>Preschool</name>
     <attendees><attendee id="9"><first_name>Sam</first_name><last_name>Ng</last_name></attendee></attendees>

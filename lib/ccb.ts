@@ -166,6 +166,18 @@ export function normalizeOccurrence(value: string | undefined): string {
   return isValidOccurrence(v) ? v : todayInChurchTz();
 }
 
+// An empty room: connection is fine, nobody is checked in yet. The display
+// falls back to the configured room name, so leaving it blank here is fine.
+function emptyRoster(occurrence: string): RosterOk {
+  return {
+    room: '',
+    occurrence,
+    updated: new Date().toISOString(),
+    count: 0,
+    checkedIn: [],
+  };
+}
+
 /**
  * Parse the attendance_profile XML into a RosterResult.
  */
@@ -177,8 +189,15 @@ export function parseAttendance(xmlText: string, occurrence: string): RosterResu
     return { error: 'ChMS returned something this display could not read.' };
   }
 
-  const response = parsed?.ccb_api?.response;
+  const api = parsed?.ccb_api;
+  const response = api?.response;
   if (!response) {
+    // When there are simply no check-ins for the event/occurrence, ChMS omits
+    // <response> and returns a <messages> note ("There are no attendance
+    // records..."). That is an empty room, not an error.
+    if (api?.messages) {
+      return emptyRoster(occurrence);
+    }
     return { error: 'ChMS returned an unexpected response.' };
   }
 
@@ -192,13 +211,7 @@ export function parseAttendance(xmlText: string, occurrence: string): RosterResu
   const events = toArray<any>(response.events?.event);
   if (!events.length) {
     // No event for this date usually means the room has not met yet today.
-    return {
-      room: '',
-      occurrence,
-      updated: new Date().toISOString(),
-      count: 0,
-      checkedIn: [],
-    };
+    return emptyRoster(occurrence);
   }
 
   const roomName = decodeNumericEntities(String(events[0].name ?? '').trim());
@@ -342,59 +355,6 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
 
   const body = await res.text();
   return parseAttendance(body, occ);
-}
-
-/**
- * Structural diagnostic for one attendance call. Reports what ChMS sent back
- * WITHOUT exposing any attendee data: HTTP status, the response's root/shape,
- * and any <error> text (which is a ChMS message, not personal data). Used only
- * by the temporary ?debug=1 path to pinpoint a "unexpected response".
- */
-export async function diagnoseAttendance(
-  eventId: string,
-  occurrence?: string,
-): Promise<Record<string, unknown>> {
-  const base = apiBase();
-  if (!base) return { configured: false };
-  if (!/^\d+$/.test(String(eventId))) return { configured: true, invalidRoomId: true };
-
-  const occ = normalizeOccurrence(occurrence);
-  const url =
-    `${base.url}?srv=attendance_profile&id=${encodeURIComponent(eventId)}` +
-    `&occurrence=${encodeURIComponent(occ)}`;
-
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: { Authorization: `Basic ${base.auth}` },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
-    });
-  } catch (err) {
-    return { configured: true, fetchError: (err as { name?: string })?.name ?? 'error' };
-  }
-
-  const body = await res.text();
-  const head = body.trimStart();
-  const errorMatch = body.match(/<error\b[^>]*>([\s\S]*?)<\/error>/i);
-
-  return {
-    configured: true,
-    subdomain: process.env.CCB_SUBDOMAIN,
-    eventId,
-    occurrence: occ,
-    httpStatus: res.status,
-    bodyLength: body.length,
-    opensWith: head.slice(0, 60), // structural only (XML decl / root tag)
-    looksLikeHtml: /^<!doctype html|^<html/i.test(head),
-    hasCcbApiRoot: /<ccb_api\b/i.test(body),
-    hasResponseNode: /<response\b/i.test(body),
-    hasErrorsNode: /<errors?\b/i.test(body),
-    hasEventsNode: /<events\b/i.test(body),
-    errorText: errorMatch ? errorMatch[1].trim().slice(0, 200) : '',
-    // Full reply is safe to surface only when it carries no attendee data.
-    raw: /<events\b/i.test(body) ? '(omitted: contains attendee data)' : body,
-  };
 }
 
 async function fetchIndividualGuardian(childId: string): Promise<Guardian | null> {
