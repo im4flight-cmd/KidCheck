@@ -27,8 +27,9 @@ You can do this in two passes if you like:
      owner may need to approve that. That is the same admin who has the ChMS
      credentials, so ask them to approve if it asks.
 
-4. Vercel will say the framework is **Next.js**. Leave all the build settings
-   exactly as they are.
+4. Vercel will say the framework is **Next.js**. Leave the build settings
+   exactly as they are. If you see a **Git Branch** or **Production Branch**
+   setting, make sure it is set to **main**.
 
 5. Open **Environment Variables** and add these two, so the preview shows
    something. Type the name on the left, the value on the right, click **Add**
@@ -95,3 +96,11 @@ Send me the link and a quick note on what you see. Common ones:
   `CCB_API_PASS`.
 - **A room shows no one all service** can mean the event id is wrong, or that
   room simply has no check-ins yet.
+
+## Optional one time tidy (for an admin)
+
+The app now lives on the repo's `main` branch. If an admin sets `main` as the
+repo's **default branch** in GitHub (Settings > General > Default branch, two
+clicks), then Vercel and any future updates target it automatically and nobody
+has to think about branches again. This is optional. Picking `main` in step 4
+above works fine without it.
