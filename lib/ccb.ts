@@ -398,6 +398,52 @@ export async function diagnoseEventDates(
   return { eventId, today, results };
 }
 
+/**
+ * Temporary setup diagnostic: asks CCB directly what occurrences (schedule
+ * entries) exist for an event via event_profile, and pulls out every
+ * date/time-looking string in the raw reply. No names, no attendee data.
+ * Used to find the exact occurrence (date, and time if the schedule is a
+ * custom one-off) a check-in was actually filed under, when attendance_profile
+ * with a date-only occurrence comes back empty.
+ */
+export async function diagnoseEventOccurrences(
+  eventId: string,
+): Promise<Record<string, unknown>> {
+  const base = apiBase();
+  if (!base) return { configured: false };
+  if (!/^\d+$/.test(String(eventId))) return { configured: true, invalidEventId: String(eventId) };
+
+  const url = `${base.url}?srv=event_profile&id=${encodeURIComponent(eventId)}`;
+  let body: string;
+  let status: number;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Basic ${base.auth}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
+    });
+    status = res.status;
+    body = await res.text();
+  } catch (err) {
+    return { eventId, status: 0, error: String((err as Error)?.message ?? err) };
+  }
+
+  const errorMatch = body.match(/<error>([^<]*)<\/error>/i);
+  if (errorMatch) return { eventId, status, ccbError: errorMatch[1].trim() };
+
+  // Pull every date, or date+time, looking string out of the raw XML.
+  const dateTimes = [...new Set(body.match(/\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?/g) ?? [])].sort();
+  // Also grab any element that looks like it names a day/schedule, for context.
+  const nameTag = body.match(/<name>([^<]*)<\/name>/i);
+
+  return {
+    eventId,
+    status,
+    name: nameTag ? nameTag[1].trim() : undefined,
+    dateTimesFound: dateTimes,
+  };
+}
+
 async function fetchIndividualGuardian(childId: string): Promise<Guardian | null> {
   const base = apiBase();
   if (!base || !/^\d+$/.test(String(childId))) return null;
