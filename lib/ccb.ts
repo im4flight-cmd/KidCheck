@@ -344,6 +344,57 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
   return parseAttendance(body, occ);
 }
 
+/**
+ * Structural diagnostic for one attendance call. Reports what ChMS sent back
+ * WITHOUT exposing any attendee data: HTTP status, the response's root/shape,
+ * and any <error> text (which is a ChMS message, not personal data). Used only
+ * by the temporary ?debug=1 path to pinpoint a "unexpected response".
+ */
+export async function diagnoseAttendance(
+  eventId: string,
+  occurrence?: string,
+): Promise<Record<string, unknown>> {
+  const base = apiBase();
+  if (!base) return { configured: false };
+  if (!/^\d+$/.test(String(eventId))) return { configured: true, invalidRoomId: true };
+
+  const occ = normalizeOccurrence(occurrence);
+  const url =
+    `${base.url}?srv=attendance_profile&id=${encodeURIComponent(eventId)}` +
+    `&occurrence=${encodeURIComponent(occ)}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { Authorization: `Basic ${base.auth}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
+    });
+  } catch (err) {
+    return { configured: true, fetchError: (err as { name?: string })?.name ?? 'error' };
+  }
+
+  const body = await res.text();
+  const head = body.trimStart();
+  const errorMatch = body.match(/<error\b[^>]*>([\s\S]*?)<\/error>/i);
+
+  return {
+    configured: true,
+    subdomain: process.env.CCB_SUBDOMAIN,
+    eventId,
+    occurrence: occ,
+    httpStatus: res.status,
+    bodyLength: body.length,
+    opensWith: head.slice(0, 60), // structural only (XML decl / root tag)
+    looksLikeHtml: /^<!doctype html|^<html/i.test(head),
+    hasCcbApiRoot: /<ccb_api\b/i.test(body),
+    hasResponseNode: /<response\b/i.test(body),
+    hasErrorsNode: /<errors?\b/i.test(body),
+    hasEventsNode: /<events\b/i.test(body),
+    errorText: errorMatch ? errorMatch[1].trim().slice(0, 200) : '',
+  };
+}
+
 async function fetchIndividualGuardian(childId: string): Promise<Guardian | null> {
   const base = apiBase();
   if (!base || !/^\d+$/.test(String(childId))) return null;

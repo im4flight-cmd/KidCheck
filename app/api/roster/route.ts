@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRoster } from '@/lib/ccb';
+import { getRoster, diagnoseAttendance } from '@/lib/ccb';
 
 // Always run fresh, never statically cached.
 export const dynamic = 'force-dynamic';
@@ -14,6 +14,13 @@ export async function GET(req: NextRequest) {
       { error: 'Missing or invalid room id.' },
       { status: 400, headers: { 'Cache-Control': 'no-store' } },
     );
+  }
+
+  // Temporary setup diagnostic: /api/roster?room=<id>&debug=1 reports the shape
+  // of what ChMS returns (no attendee data) to pinpoint connection problems.
+  if (req.nextUrl.searchParams.get('debug') === '1') {
+    const info = await diagnoseAttendance(room, occurrence);
+    return NextResponse.json(info, { headers: { 'Cache-Control': 'no-store' } });
   }
 
   const roster = await getRoster(room, occurrence);
