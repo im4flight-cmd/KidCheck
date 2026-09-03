@@ -68,7 +68,7 @@ When your admin gives you the three ChMS values, come back to the Vercel project
    The chart also shows each child's parent name and phone, pulled from CCB, so
    a teacher can reach out from the church phone. Two things for that:
    - When your admin sets up the API user, make sure both **`attendance_profile`**
-     and **`individual_profile`** services are checked.
+     and **`individual_profile_from_id`** services are checked.
    - Those phone numbers show on the classroom screen. That is on by default. If
      you would rather show only the parent's name, or nothing, add
      `PARENT_CONTACT_MODE` set to `name` or `off`.

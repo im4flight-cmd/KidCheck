@@ -3,7 +3,7 @@
  *
  * Server side "brain." Calls attendance_profile for one event (room) and one
  * occurrence (date), parses the XML, and optionally enriches each checked-in
- * child with a parent/guardian contact pulled from individual_profile.
+ * child with a parent/guardian contact pulled from individual_profile_from_id.
  * Credentials come from environment variables and never reach the browser.
  *
  * Confirmed attendance_profile response shape:
@@ -22,7 +22,7 @@
  *
  * Note: the ChMS request parameter for the event is "id", not "event_id".
  *
- * Parent contact (individual_profile) shape is coded to the documented CCB
+ * Parent contact (individual_profile_from_id) shape is coded to the documented CCB
  * shape below and must be confirmed on the first live call (Phase 0). Because
  * it degrades gracefully (a child simply shows without contact), an imperfect
  * match never breaks the roster.
@@ -216,7 +216,7 @@ export function parseAttendance(xmlText: string, occurrence: string): RosterResu
 }
 
 /**
- * Extract a parent/guardian contact from an individual_profile response.
+ * Extract a parent/guardian contact from an individual_profile_from_id response.
  * Guardian name comes from the family's Primary Contact (then Spouse, then any
  * non-child member). Phone prefers a mobile, then home/contact/work.
  * Returns null when the profile is readable but has no usable contact.
@@ -332,13 +332,13 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
 async function fetchIndividualGuardian(childId: string): Promise<Guardian | null> {
   const base = apiBase();
   if (!base || !/^\d+$/.test(String(childId))) return null;
-  const url = `${base.url}?srv=individual_profile&id=${encodeURIComponent(childId)}`;
+  const url = `${base.url}?srv=individual_profile_from_id&id=${encodeURIComponent(childId)}`;
   const res = await fetch(url, {
     headers: { Authorization: `Basic ${base.auth}` },
     cache: 'no-store',
     signal: AbortSignal.timeout(10000),
   });
-  if (res.status !== 200) throw new Error('individual_profile HTTP ' + res.status);
+  if (res.status !== 200) throw new Error('individual_profile_from_id HTTP ' + res.status);
   return parseIndividualGuardian(await res.text());
 }
 

@@ -78,7 +78,7 @@ has no API to send a text, so this surfaces who to contact and a teacher texts
 or calls them from the church's own phone (for example UniFi Talk). Two setup
 notes:
 
-- The API user needs the **`individual_profile`** service enabled in ChMS, in
+- The API user needs the **`individual_profile_from_id`** service enabled in ChMS, in
   addition to `attendance_profile`.
 - Parent phone numbers on a room-visible screen are sensitive. Default is
   `full`; set `PARENT_CONTACT_MODE=name` or `off` to dial that back. Lookups are
