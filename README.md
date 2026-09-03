@@ -43,6 +43,10 @@ ROOMS=[{"id":"101","name":"Nursery"},{"id":"102","name":"Preschool"}]
 
 ## Deploy to Vercel
 
+New to this? **[DEPLOY.md](DEPLOY.md)** is a plain, click by click, five minute
+guide from signing up to a live link, including a demo-mode-first path so you can
+see it working before the ChMS credentials arrive. The short version:
+
 1. Import this repository at https://vercel.com/new. The framework is detected
    automatically, no build settings to change.
 2. Add the environment variables below under Project Settings > Environment
