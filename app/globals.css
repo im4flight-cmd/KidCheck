@@ -247,6 +247,16 @@ a {
   color: var(--muted);
   max-width: 34ch;
 }
+.state .state-note {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.55;
+  max-width: 42ch;
+  font-weight: 600;
+}
+.state .state-note:empty {
+  display: none;
+}
 
 /* ---- Display footer ----------------------------------------------------- */
 .board-footer {
@@ -277,6 +287,10 @@ a {
 }
 .live.stale .dot {
   background: #d9863b;
+  animation: none;
+}
+.live.setup .dot {
+  background: var(--muted);
   animation: none;
 }
 .updated {

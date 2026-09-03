@@ -31,6 +31,15 @@ function CheckMark() {
   );
 }
 
+function ClockMark() {
+  return (
+    <svg className="state-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="11" stroke="#d0b060" strokeWidth="1.4" opacity="0.7" />
+      <path d="M12 7v5l3.4 2" stroke="#d0b060" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export default function RoomBoard({
   roomId,
   initialName,
@@ -44,6 +53,7 @@ export default function RoomBoard({
 }) {
   const [roster, setRoster] = useState<Roster | null>(null);
   const [status, setStatus] = useState('');
+  const [statusCode, setStatusCode] = useState('');
   const [loading, setLoading] = useState(true);
   const inFlight = useRef(false);
   const ctrlRef = useRef<AbortController | null>(null);
@@ -79,9 +89,11 @@ export default function RoomBoard({
       const json = await res.json();
       if (json && json.error) {
         setStatus(String(json.error));
+        setStatusCode(json.code ? String(json.code) : '');
       } else {
         setRoster(json as Roster);
         setStatus('');
+        setStatusCode('');
       }
     } catch (err) {
       if ((err as { name?: string })?.name !== 'AbortError') {
@@ -114,7 +126,8 @@ export default function RoomBoard({
   const updated = roster?.updated
     ? new Date(roster.updated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : '';
-  const stale = status !== '';
+  const notConfigured = statusCode === 'not_configured';
+  const stale = status !== '' && !notConfigured;
 
   function openPage(p: Attendee) {
     setPageError('');
@@ -220,6 +233,16 @@ export default function RoomBoard({
             <div className="state-text">No one checked in yet</div>
             <div className="state-sub">Names appear here the moment a child is checked into this room.</div>
           </div>
+        ) : notConfigured ? (
+          <div className="state">
+            <ClockMark />
+            <div className="state-text">Almost ready</div>
+            <div className="state-sub">
+              This screen will show live check-ins as soon as the church&rsquo;s check-in
+              system is connected.
+            </div>
+            <div className="state-note">{status}</div>
+          </div>
         ) : (
           <div className="state">
             <div className="state-text">Cannot load the roster</div>
@@ -230,9 +253,13 @@ export default function RoomBoard({
 
       <footer className="board-footer">
         <Link href="/" className="rooms-link">‹ Rooms</Link>
-        <span className={stale ? 'live stale' : 'live'}>
+        <span className={notConfigured ? 'live setup' : stale ? 'live stale' : 'live'}>
           <span className="dot" />
-          {stale ? 'Reconnecting' : `Live, updates every ${Math.round(REFRESH_MS / 1000)}s`}
+          {notConfigured
+            ? 'Waiting for setup'
+            : stale
+              ? 'Reconnecting'
+              : `Live, updates every ${Math.round(REFRESH_MS / 1000)}s`}
         </span>
         <span className="updated">{updated ? `Updated ${updated}` : ''}</span>
         <span className="status">{stale ? status : ''}</span>

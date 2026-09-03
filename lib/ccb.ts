@@ -56,7 +56,7 @@ export type RosterOk = {
   cached?: boolean;
 };
 
-export type RosterError = { error: string };
+export type RosterError = { error: string; code?: string };
 
 export type RosterResult = RosterOk | RosterError;
 
@@ -284,6 +284,7 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
     return {
       error:
         'Server is not configured yet. Set CCB_SUBDOMAIN, CCB_API_USER, and CCB_API_PASS.',
+      code: 'not_configured',
     };
   }
   if (!/^\d+$/.test(String(eventId))) {

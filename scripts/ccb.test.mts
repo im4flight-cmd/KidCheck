@@ -12,6 +12,7 @@ import {
   isValidOccurrence,
   normalizeOccurrence,
   isError,
+  fetchRoster,
 } from '../lib/ccb.ts';
 import { toE164 } from '../lib/phone.ts';
 
@@ -126,6 +127,18 @@ test('parseIndividualGuardian returns null when nothing is usable', () => {
   const body = `<ccb_api><response><individuals count="1"><individual id="9">
     <first_name>Sam</first_name><last_name>Ng</last_name></individual></individuals></response></ccb_api>`;
   assert.equal(parseIndividualGuardian(body), null);
+});
+
+test('fetchRoster reports a not_configured code when credentials are missing', async () => {
+  delete process.env.CCB_SUBDOMAIN;
+  delete process.env.CCB_API_USER;
+  delete process.env.CCB_API_PASS;
+  const r = await fetchRoster('101', '2026-09-07');
+  assert.ok(isError(r));
+  if (isError(r)) {
+    assert.equal(r.code, 'not_configured');
+    assert.match(r.error, /CCB_SUBDOMAIN/);
+  }
 });
 
 test('toE164 normalizes US numbers and passes international through', () => {
