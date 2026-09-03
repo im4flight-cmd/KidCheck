@@ -436,11 +436,17 @@ export async function diagnoseEventOccurrences(
   // Also grab any element that looks like it names a day/schedule, for context.
   const nameTag = body.match(/<name>([^<]*)<\/name>/i);
 
+  // If nothing useful was found, this event_profile response is about the
+  // event/schedule configuration, not individual children, so it is safe to
+  // hand back as-is to see exactly what CCB actually returned.
+  const raw = dateTimes.length === 0 ? body.slice(0, 4000) : undefined;
+
   return {
     eventId,
     status,
     name: nameTag ? nameTag[1].trim() : undefined,
     dateTimesFound: dateTimes,
+    raw,
   };
 }
 
