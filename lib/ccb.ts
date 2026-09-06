@@ -267,7 +267,13 @@ export function parseIndividualGuardian(xmlText: string): Guardian | null {
     members.find((m) => position(m) === 'primary contact') ||
     members.find((m) => position(m) === 'spouse') ||
     members.find((m) => position(m) && position(m) !== 'child');
-  const guardian = adult ? formatName(nodeText(adult.first_name), nodeText(adult.last_name)) : '';
+  // A family member's name is the text of its <individual> tag as one combined
+  // string (e.g. "Wayne Aaland"), not separate first_name/last_name fields.
+  // Split on the first space so the usual first-name-plus-last-initial privacy
+  // formatting still applies.
+  const fullName = adult ? nodeText(adult.individual) : '';
+  const [adultFirst, ...rest] = fullName.split(/\s+/).filter(Boolean);
+  const guardian = adult ? formatName(adultFirst ?? '', rest.join(' ')) : '';
 
   const phone = bestPhone(indiv.phones);
 
@@ -537,10 +543,17 @@ export async function diagnoseGuardianRaw(childId: string): Promise<Record<strin
   const errorMatch = body.match(/<error\b[^>]*>([^<]*)<\/error>/i);
   if (errorMatch) return { childId, status, ccbError: errorMatch[1].trim() };
 
+  // Pull out whatever phone-ish section exists, wherever it falls in the
+  // document, since the response is long and a fixed head slice can cut it
+  // off before reaching it (as it did here: addresses come first).
+  const phoneIdx = body.search(/<[a-z_]*phone[a-z_]*[ >]/i);
+  const phoneSnippet = phoneIdx >= 0 ? body.slice(phoneIdx, phoneIdx + 1500) : undefined;
+
   return {
     childId,
     status,
     parsedResult: parseIndividualGuardian(body),
+    phoneSnippet,
     raw: body.slice(0, 4000),
   };
 }

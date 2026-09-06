@@ -155,6 +155,9 @@ test('formatPhone normalizes US numbers, leaves oddities alone', () => {
   assert.equal(formatPhone('ext 5'), 'ext 5');
 });
 
+// Real confirmed shape from a live individual_profile_from_id call: a family
+// member's name is the TEXT of its <individual> tag as one combined string
+// ("Sarah Bolton"), not separate first_name/last_name fields.
 test('parseIndividualGuardian picks the primary contact and best phone', () => {
   const body = `<?xml version="1.0"?><ccb_api><response><individuals count="1"><individual id="122">
     <first_name>Ben</first_name><last_name>Bolton</last_name>
@@ -163,15 +166,27 @@ test('parseIndividualGuardian picks the primary contact and best phone', () => {
       <phone type="mobile">2105550142</phone>
     </phones>
     <family_members>
-      <family_member id="120"><first_name>Sarah</first_name><last_name>Bolton</last_name><family_position>Primary Contact</family_position></family_member>
-      <family_member id="121"><first_name>Mark</first_name><last_name>Bolton</last_name><family_position>Spouse</family_position></family_member>
-      <family_member id="122"><first_name>Ben</first_name><last_name>Bolton</last_name><family_position>Child</family_position></family_member>
+      <family_member><individual id="120">Sarah Bolton</individual><family_position>Primary Contact</family_position></family_member>
+      <family_member><individual id="121">Mark Bolton</individual><family_position>Spouse</family_position></family_member>
+      <family_member><individual id="122">Ben Bolton</individual><family_position>Child</family_position></family_member>
     </family_members>
   </individual></individuals></response></ccb_api>`;
   const g = parseIndividualGuardian(body);
   assert.ok(g);
-  assert.equal(g!.guardian, 'Sarah B.'); // primary contact
+  assert.equal(g!.guardian, 'Sarah B.'); // primary contact, last-initial formatting applied
   assert.equal(g!.phone, '(210) 555-0142'); // mobile preferred over home
+});
+
+test('parseIndividualGuardian handles a multi-word last name', () => {
+  const body = `<ccb_api><response><individuals count="1"><individual id="661">
+    <phones><phone type="mobile">2105550199</phone></phones>
+    <family_members>
+      <family_member><individual id="659">Wayne Aaland IV</individual><family_position>Primary Contact</family_position></family_member>
+    </family_members>
+  </individual></individuals></response></ccb_api>`;
+  const g = parseIndividualGuardian(body);
+  assert.ok(g);
+  assert.equal(g!.guardian, 'Wayne A.');
 });
 
 test('parseIndividualGuardian returns null when nothing is usable', () => {
