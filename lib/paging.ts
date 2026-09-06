@@ -93,7 +93,10 @@ export async function sendPage(childId: string, room: string): Promise<PageResul
   if (!sent.ok) {
     // eslint-disable-next-line no-console
     console.error('[paging:clearstream] send failed', sent.status, sent.detail);
-    return { error: `The text service did not accept the message (${sent.status || 'no response'}).` };
+    // Surface Clearstream's own reason (it is not sensitive, no phone number
+    // or key in it) so the exact fix is visible without a server log.
+    const why = sent.detail ? `: ${sent.detail}` : '';
+    return { error: `The text service did not accept the message (${sent.status || 'no response'})${why}` };
   }
   lastSent.set(childId, now);
   return { ok: true, dryRun: false, guardian, toMasked: maskPhone(phone) };
