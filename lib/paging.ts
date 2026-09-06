@@ -8,12 +8,14 @@
  * CLEARSTREAM_API_KEY is set. Gated by the confirm tap and by the iPad's own
  * passcode/Guided Access, not by an in-app PIN.
  *
- * Clearstream API (confirmed shape):
+ * Clearstream API (confirmed shape, from their own validation errors on a
+ * live send):
  *   POST https://api.getclearstream.com/v1/messages
  *   Header: X-Api-Key: <key>
- *   Form fields: message_header, message_body, to (recipient mobile number)
- * The exact success/error body should be eyeballed on the first live send;
- * we log Clearstream's response so that is a one-line adjustment if needed.
+ *   Form fields: message_header, message_body, subscriber (recipient mobile
+ *   number for a one-off send; Clearstream is list-based, so the alternative
+ *   to a "subscriber" is a "lists" of saved list ids, which this app never
+ *   uses).
  */
 
 import { fetchGuardian } from '@/lib/ccb';
@@ -111,7 +113,10 @@ async function sendClearstream(
   const form = new URLSearchParams();
   form.set('message_header', header);
   form.set('message_body', body);
-  form.set('to', to);
+  // Clearstream's own validation named this field directly: "subscriber
+  // field is required when lists is not present." A one-off send names the
+  // recipient here rather than addressing a saved list.
+  form.set('subscriber', to);
 
   let res: Response;
   try {
