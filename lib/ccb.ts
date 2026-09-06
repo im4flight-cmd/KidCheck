@@ -22,10 +22,10 @@
  *
  * Note: the ChMS request parameter for the event is "id", not "event_id".
  *
- * Parent contact (individual_profile_from_id) shape is coded to the documented CCB
- * shape below and must be confirmed on the first live call (Phase 0). Because
- * it degrades gracefully (a child simply shows without contact), an imperfect
- * match never breaks the roster.
+ * Note: individual_profile_from_id takes "individual_id", not "id" (unlike
+ * attendance_profile and event_profile, which do use "id").
+ *
+ * Confirmed individual_profile_from_id response shape:
  *   <ccb_api><response><individuals count="1"><individual id="122">
  *     <phones><phone type="mobile">2105550142</phone>...</phones>
  *     <family_members>
@@ -497,7 +497,7 @@ export async function diagnoseNoOccurrence(eventId: string): Promise<Record<stri
 async function fetchIndividualGuardian(childId: string): Promise<Guardian | null> {
   const base = apiBase();
   if (!base || !/^\d+$/.test(String(childId))) return null;
-  const url = `${base.url}?srv=individual_profile_from_id&id=${encodeURIComponent(childId)}`;
+  const url = `${base.url}?srv=individual_profile_from_id&individual_id=${encodeURIComponent(childId)}`;
   const res = await fetch(url, {
     headers: { Authorization: `Basic ${base.auth}` },
     cache: 'no-store',
@@ -519,7 +519,7 @@ export async function diagnoseGuardianRaw(childId: string): Promise<Record<strin
   if (!base) return { configured: false };
   if (!/^\d+$/.test(String(childId))) return { configured: true, invalidChildId: String(childId) };
 
-  const url = `${base.url}?srv=individual_profile_from_id&id=${encodeURIComponent(childId)}`;
+  const url = `${base.url}?srv=individual_profile_from_id&individual_id=${encodeURIComponent(childId)}`;
   let body: string;
   let status: number;
   try {
