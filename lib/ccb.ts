@@ -507,6 +507,44 @@ async function fetchIndividualGuardian(childId: string): Promise<Guardian | null
   return parseIndividualGuardian(await res.text());
 }
 
+/**
+ * Temporary setup diagnostic: raw individual_profile_from_id reply for one
+ * child id, plus what our own parser extracted from it, so a real-world shape
+ * mismatch (a family_position label or phone type we did not expect) is
+ * visible instead of guessed at. Only call with an id the caller already
+ * knows, since a family's name/phone is real personal data.
+ */
+export async function diagnoseGuardianRaw(childId: string): Promise<Record<string, unknown>> {
+  const base = apiBase();
+  if (!base) return { configured: false };
+  if (!/^\d+$/.test(String(childId))) return { configured: true, invalidChildId: String(childId) };
+
+  const url = `${base.url}?srv=individual_profile_from_id&id=${encodeURIComponent(childId)}`;
+  let body: string;
+  let status: number;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Basic ${base.auth}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
+    });
+    status = res.status;
+    body = await res.text();
+  } catch (err) {
+    return { childId, status: 0, error: String((err as Error)?.message ?? err) };
+  }
+
+  const errorMatch = body.match(/<error\b[^>]*>([^<]*)<\/error>/i);
+  if (errorMatch) return { childId, status, ccbError: errorMatch[1].trim() };
+
+  return {
+    childId,
+    status,
+    parsedResult: parseIndividualGuardian(body),
+    raw: body.slice(0, 4000),
+  };
+}
+
 // A child's guardian rarely changes, so cache lookups for hours. Each child is
 // then looked up at most once per service, keeping API load tiny.
 const GUARDIAN_TTL_MS = 6 * 60 * 60 * 1000;

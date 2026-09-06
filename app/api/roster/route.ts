@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRoster, diagnoseEventDates, diagnoseEventOccurrences, diagnoseNoOccurrence } from '@/lib/ccb';
+import {
+  getRoster,
+  diagnoseEventDates,
+  diagnoseEventOccurrences,
+  diagnoseNoOccurrence,
+  diagnoseGuardianRaw,
+} from '@/lib/ccb';
 
 // Always run fresh, never statically cached.
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
+  // Temporary: /api/roster?debugGuardian=<child id> raw-dumps the guardian
+  // lookup for one child, to see CCB's actual shape when it comes back empty.
+  // Independent of `room`, since this takes a child/individual id instead.
+  const debugGuardian = req.nextUrl.searchParams.get('debugGuardian');
+  if (debugGuardian) {
+    const info = await diagnoseGuardianRaw(debugGuardian);
+    return NextResponse.json(info, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
   const room = req.nextUrl.searchParams.get('room') ?? '';
   const occurrence = req.nextUrl.searchParams.get('occurrence') ?? '';
 
