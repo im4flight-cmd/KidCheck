@@ -8,14 +8,14 @@
  * CLEARSTREAM_API_KEY is set. Gated by the confirm tap and by the iPad's own
  * passcode/Guided Access, not by an in-app PIN.
  *
- * Clearstream API (confirmed shape, from their own validation errors on a
- * live send):
+ * Clearstream API (confirmed shape, from their own structured validation
+ * errors on live sends):
  *   POST https://api.getclearstream.com/v1/messages
  *   Header: X-Api-Key: <key>
- *   Form fields: message_header, message_body, subscriber (recipient mobile
- *   number for a one-off send; Clearstream is list-based, so the alternative
- *   to a "subscriber" is a "lists" of saved list ids, which this app never
- *   uses).
+ *   Form fields: message_header, message_body, subscribers[] (recipient
+ *   mobile number(s) for a one-off send, an array; Clearstream is
+ *   list-based, so the alternative to "subscribers" is a "lists" of saved
+ *   list ids, which this app never uses).
  */
 
 import { fetchGuardian } from '@/lib/ccb';
@@ -113,10 +113,10 @@ async function sendClearstream(
   const form = new URLSearchParams();
   form.set('message_header', header);
   form.set('message_body', body);
-  // Clearstream's own validation named this field directly: "subscriber
-  // field is required when lists is not present." A one-off send names the
-  // recipient here rather than addressing a saved list.
-  form.set('subscriber', to);
+  // Clearstream's own structured validation error named this field exactly:
+  // "subscribers" (plural, an array), required when "lists" is not present.
+  // Encoded the standard form-array way: a repeated bracketed key.
+  form.append('subscribers[]', to);
 
   let res: Response;
   try {
