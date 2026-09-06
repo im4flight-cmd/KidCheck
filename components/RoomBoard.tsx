@@ -16,7 +16,6 @@ type Roster = {
 const REFRESH_MS = 20000;
 const FETCH_TIMEOUT_MS = 15000;
 const TOAST_MS = 5000;
-const PIN_KEY = 'cfc_page_pin';
 
 // The version this page was served as. Baked in at build time; compared against
 // the server's current build on each poll so a kiosk reloads itself after a
@@ -67,19 +66,9 @@ export default function RoomBoard({
 
   // Paging state
   const [pageTarget, setPageTarget] = useState<Attendee | null>(null);
-  const [pin, setPin] = useState('');
   const [sending, setSending] = useState(false);
   const [pageError, setPageError] = useState('');
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'test' } | null>(null);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(PIN_KEY);
-      if (saved) setPin(saved);
-    } catch {
-      /* private mode, ignore */
-    }
-  }, []);
 
   // Track whether a paging modal is open so an auto-reload never interrupts it.
   useEffect(() => {
@@ -162,17 +151,12 @@ export default function RoomBoard({
       const res = await fetch('/api/page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room: roomName, childId: pageTarget.id, pin }),
+        body: JSON.stringify({ room: roomName, childId: pageTarget.id }),
       });
       const json = await res.json();
       if (json?.error) {
         setPageError(String(json.error));
       } else {
-        try {
-          localStorage.setItem(PIN_KEY, pin);
-        } catch {
-          /* ignore */
-        }
         const who = json.guardian || 'the parent';
         const text = json.throttled
           ? `Already texted ${who} a moment ago`
@@ -293,24 +277,12 @@ export default function RoomBoard({
               Send a text asking <strong>{pageTarget.guardian || 'the parent'}</strong> to come to{' '}
               <strong>{roomName}</strong> for <strong>{pageTarget.name}</strong>?
             </p>
-            <label className="pin-label">
-              Staff PIN
-              <input
-                className="pin-input"
-                type="password"
-                inputMode="numeric"
-                autoComplete="off"
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                autoFocus
-              />
-            </label>
             {pageError && <div className="modal-error">{pageError}</div>}
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => setPageTarget(null)} disabled={sending}>
                 Cancel
               </button>
-              <button className="btn btn-gold" onClick={sendPage} disabled={sending || !pin}>
+              <button className="btn btn-gold" onClick={sendPage} disabled={sending} autoFocus>
                 {sending ? 'Sending…' : 'Send text'}
               </button>
             </div>

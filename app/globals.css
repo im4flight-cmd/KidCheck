@@ -517,32 +517,6 @@ a {
 .modal-sub strong {
   color: var(--text);
 }
-.pin-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 700;
-}
-.pin-input {
-  font-family: inherit;
-  font-size: 22px;
-  letter-spacing: 0.3em;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--card-border);
-  background: rgba(8, 16, 28, 0.6);
-  color: var(--text);
-  -webkit-user-select: text;
-  user-select: text;
-}
-.pin-input:focus {
-  outline: none;
-  border-color: var(--gold);
-}
 .modal-error {
   color: #ff9b7a;
   font-weight: 600;

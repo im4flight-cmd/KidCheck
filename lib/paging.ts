@@ -1,10 +1,12 @@
 /**
  * Parent paging via Clearstream (the church texting service).
  *
- * A teacher taps a child on the display; the server looks up that child's
- * guardian phone from CCB and sends a one-off text through Clearstream's API.
- * Nothing here runs unless PAGING_ENABLED=true, and it stays in a safe test
- * mode (logs instead of sends) until a real CLEARSTREAM_API_KEY is set.
+ * A teacher taps a child on the display, confirms once, and the server looks
+ * up that child's guardian phone from CCB and sends a one-off text through
+ * Clearstream's API. Nothing here runs unless PAGING_ENABLED=true, and it
+ * stays in a safe test mode (logs instead of sends) until a real
+ * CLEARSTREAM_API_KEY is set. Gated by the confirm tap and by the iPad's own
+ * passcode/Guided Access, not by an in-app PIN.
  *
  * Clearstream API (confirmed shape):
  *   POST https://api.getclearstream.com/v1/messages
@@ -23,10 +25,6 @@ const lastSent = new Map<string, number>();
 
 export function pagingEnabled(): boolean {
   return process.env.PAGING_ENABLED === 'true';
-}
-
-function pagePin(): string {
-  return String(process.env.PAGE_PIN ?? '').trim();
 }
 
 function senderHeader(): string {
@@ -56,17 +54,12 @@ export type PageResult =
   | { ok: true; dryRun: boolean; guardian: string; toMasked: string; throttled?: boolean }
   | { error: string };
 
-export async function sendPage(childId: string, room: string, pin: string): Promise<PageResult> {
+export async function sendPage(childId: string, room: string): Promise<PageResult> {
   if (!pagingEnabled()) return { error: 'Paging is turned off.' };
 
   const demo = process.env.DEMO_MODE === 'true';
 
-  if (!demo) {
-    const required = pagePin();
-    if (!required) return { error: 'Paging is not fully set up yet (no PIN configured).' };
-    if (String(pin ?? '').trim() !== required) return { error: 'That PIN is not right.' };
-    if (!/^\d+$/.test(String(childId))) return { error: 'Invalid child.' };
-  }
+  if (!demo && !/^\d+$/.test(String(childId))) return { error: 'Invalid child.' };
 
   // Find the guardian to text.
   let guardian = 'their parent';

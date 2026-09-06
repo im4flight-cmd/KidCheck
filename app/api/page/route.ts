@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function POST(req: NextRequest) {
-  let payload: { room?: string; childId?: string; pin?: string };
+  let payload: { room?: string; childId?: string };
   try {
     payload = await req.json();
   } catch {
@@ -14,9 +14,8 @@ export async function POST(req: NextRequest) {
 
   const room = String(payload?.room ?? '');
   const childId = String(payload?.childId ?? '');
-  const pin = String(payload?.pin ?? '');
 
-  const pageResult = await sendPage(childId, room, pin);
+  const pageResult = await sendPage(childId, room);
   // Always 200; the client reads `error` vs `ok` from the body.
   return NextResponse.json(pageResult, { headers: { 'Cache-Control': 'no-store' } });
 }

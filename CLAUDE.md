@@ -22,8 +22,9 @@ Vercel. Live at **kid-check-ashen.vercel.app**.
 ## Env vars (set in Vercel → Production)
 - `CCB_SUBDOMAIN`, `CCB_API_USER`, `CCB_API_PASS` — CCB API user (set).
 - `PARENT_CONTACT_MODE` — full (default) | name | off. Shows parent contact.
-- Paging (set): `PAGING_ENABLED=true`, `PAGE_PIN`, `CLEARSTREAM_API_KEY`.
-  Optional: `PAGING_TEST`, `PAGE_SENDER`, `PAGE_MESSAGE`.
+- Paging (set): `PAGING_ENABLED=true`, `CLEARSTREAM_API_KEY`. No in-app PIN;
+  the iPad's own Guided Access passcode plus a confirm tap is the gate (Wayne's
+  call). Optional: `PAGING_TEST`, `PAGE_SENDER`, `PAGE_MESSAGE`.
 - `DEMO_MODE` and `ROOMS` were REMOVED so `rooms.json` is the source of truth
   and real check-ins show. Do not re-add unless previewing.
 - Never commit secret values; env var NAMES only.
@@ -45,7 +46,7 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
   (cached ~6h). Occurrence defaults to today in America/Chicago.
 - `lib/rooms.ts` — room config (ids arrays). `lib/paging.ts` — Clearstream send
   (`api.getclearstream.com/v1/messages`, X-Api-Key, message_header/body/to),
-  PIN-gated, dry-run until key present. `lib/phone.ts` — E.164.
+  confirm-tap gated (no PIN), dry-run until key present. `lib/phone.ts` — E.164.
 - `app/api/roster/route.ts` — GET roster JSON (+ temporary `?debug=1`).
   `app/api/page/route.ts` — POST paging.
 - `app/room/[room]/page.tsx`, `components/RoomBoard.tsx` — the display (auto
