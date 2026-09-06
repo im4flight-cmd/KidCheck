@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseAttendance,
-  parseIndividualGuardian,
+  parseGuardianCandidates,
+  parseOwnPhone,
   formatName,
   formatPhone,
   isValidOccurrence,
@@ -155,44 +156,62 @@ test('formatPhone normalizes US numbers, leaves oddities alone', () => {
   assert.equal(formatPhone('ext 5'), 'ext 5');
 });
 
-// Real confirmed shape from a live individual_profile_from_id call: a family
-// member's name is the TEXT of its <individual> tag as one combined string
-// ("Sarah Bolton"), not separate first_name/last_name fields.
-test('parseIndividualGuardian picks the primary contact and best phone', () => {
-  const body = `<?xml version="1.0"?><ccb_api><response><individuals count="1"><individual id="122">
-    <first_name>Ben</first_name><last_name>Bolton</last_name>
-    <phones>
-      <phone type="home">210-555-0101</phone>
-      <phone type="mobile">2105550142</phone>
-    </phones>
+// Real confirmed shape: a child's own profile never carries a phone (minors
+// have none), and a family member's name is the TEXT of its <individual> tag
+// as one combined string ("Sarah Bolton"), with that tag's id attribute
+// being their own individual_id -- not separate first_name/last_name fields.
+// So this is a two-step lookup: candidates come from the CHILD's profile,
+// and the phone comes from whichever adult's OWN profile.
+test('parseGuardianCandidates orders primary contact, then spouse, then others', () => {
+  const childBody = `<?xml version="1.0"?><ccb_api><response><individuals count="1"><individual id="122">
+    <phones><phone type="mobile"></phone></phones>
     <family_members>
-      <family_member><individual id="120">Sarah Bolton</individual><family_position>Primary Contact</family_position></family_member>
       <family_member><individual id="121">Mark Bolton</individual><family_position>Spouse</family_position></family_member>
+      <family_member><individual id="120">Sarah Bolton</individual><family_position>Primary Contact</family_position></family_member>
       <family_member><individual id="122">Ben Bolton</individual><family_position>Child</family_position></family_member>
     </family_members>
   </individual></individuals></response></ccb_api>`;
-  const g = parseIndividualGuardian(body);
-  assert.ok(g);
-  assert.equal(g!.guardian, 'Sarah B.'); // primary contact, last-initial formatting applied
-  assert.equal(g!.phone, '(210) 555-0142'); // mobile preferred over home
+  const candidates = parseGuardianCandidates(childBody);
+  assert.deepEqual(
+    candidates.map((c) => [c.id, c.name]),
+    [
+      ['120', 'Sarah B.'], // primary contact first, regardless of document order
+      ['121', 'Mark B.'],
+    ],
+  );
 });
 
-test('parseIndividualGuardian handles a multi-word last name', () => {
-  const body = `<ccb_api><response><individuals count="1"><individual id="661">
-    <phones><phone type="mobile">2105550199</phone></phones>
+test('parseGuardianCandidates handles a multi-word last name', () => {
+  const childBody = `<ccb_api><response><individuals count="1"><individual id="661">
     <family_members>
       <family_member><individual id="659">Wayne Aaland IV</individual><family_position>Primary Contact</family_position></family_member>
     </family_members>
   </individual></individuals></response></ccb_api>`;
-  const g = parseIndividualGuardian(body);
-  assert.ok(g);
-  assert.equal(g!.guardian, 'Wayne A.');
+  const candidates = parseGuardianCandidates(childBody);
+  assert.deepEqual(candidates, [{ id: '659', name: 'Wayne A.' }]);
 });
 
-test('parseIndividualGuardian returns null when nothing is usable', () => {
+test('parseOwnPhone reads an adult\'s own profile, mobile preferred over home', () => {
+  const adultBody = `<ccb_api><response><individuals count="1"><individual id="120">
+    <phones>
+      <phone type="home">210-555-0101</phone>
+      <phone type="mobile">2105550142</phone>
+    </phones>
+  </individual></individuals></response></ccb_api>`;
+  assert.equal(parseOwnPhone(adultBody), '(210) 555-0142');
+});
+
+test('parseOwnPhone is blank on a child\'s own (phone-less) profile', () => {
+  const childBody = `<ccb_api><response><individuals count="1"><individual id="661">
+    <phones><phone type="mobile"></phone><phone type="home"></phone></phones>
+  </individual></individuals></response></ccb_api>`;
+  assert.equal(parseOwnPhone(childBody), '');
+});
+
+test('parseGuardianCandidates is empty with no family_members', () => {
   const body = `<ccb_api><response><individuals count="1"><individual id="9">
     <first_name>Sam</first_name><last_name>Ng</last_name></individual></individuals></response></ccb_api>`;
-  assert.equal(parseIndividualGuardian(body), null);
+  assert.deepEqual(parseGuardianCandidates(body), []);
 });
 
 test('fetchRoster reports a not_configured code when credentials are missing', async () => {

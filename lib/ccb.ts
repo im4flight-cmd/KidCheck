@@ -25,15 +25,20 @@
  * Note: individual_profile_from_id takes "individual_id", not "id" (unlike
  * attendance_profile and event_profile, which do use "id").
  *
- * Confirmed individual_profile_from_id response shape:
- *   <ccb_api><response><individuals count="1"><individual id="122">
- *     <phones><phone type="mobile">2105550142</phone>...</phones>
+ * Confirmed individual_profile_from_id response shape (a child's own record):
+ *   <ccb_api><response><individuals count="1"><individual id="661">
+ *     <phones><phone type="mobile"></phone>...</phones>   -- always empty, minors have none
  *     <family_members>
- *       <family_member id="120"><first_name>Sarah</first_name><last_name>Bolton</last_name>
+ *       <family_member><individual id="659">Wayne Aaland</individual>
  *         <family_position>Primary Contact</family_position></family_member>
  *       ...
  *     </family_members>
  *   </individual></individuals></response></ccb_api>
+ * A family member's name is the TEXT of its <individual> tag as one combined
+ * string, with that tag's id attribute being THEIR OWN individual_id -- not
+ * separate first_name/last_name fields. Their phone lives on THEIR OWN
+ * profile (a second individual_profile_from_id call using that id), never on
+ * the child's, so finding a parent to page is a two-step lookup.
  */
 
 import { XMLParser } from 'fast-xml-parser';
@@ -242,43 +247,70 @@ export function parseAttendance(xmlText: string, occurrence: string): RosterResu
   };
 }
 
+export type GuardianCandidate = { id: string; name: string };
+
+function candidateFromMember(m: any): GuardianCandidate | null {
+  // A family member's name is the text of its <individual> tag as one
+  // combined string (e.g. "Wayne Aaland"), with that same tag's id attribute
+  // being the person's own individual_id, not separate first_name/last_name
+  // fields. Split the name on the first space so the usual
+  // first-name-plus-last-initial privacy formatting still applies.
+  const idAttr = m?.individual?.['@_id'];
+  const id = idAttr != null ? String(idAttr) : '';
+  const fullName = nodeText(m?.individual);
+  if (!id && !fullName) return null;
+  const [first, ...rest] = fullName.split(/\s+/).filter(Boolean);
+  return { id, name: formatName(first ?? '', rest.join(' ')) };
+}
+
 /**
- * Extract a parent/guardian contact from an individual_profile_from_id response.
- * Guardian name comes from the family's Primary Contact (then Spouse, then any
- * non-child member). Phone prefers a mobile, then home/contact/work.
- * Returns null when the profile is readable but has no usable contact.
+ * List the adults on a CHILD's individual_profile_from_id response, in
+ * contact priority order: Primary Contact, then Spouse, then any other
+ * non-Child member. Each candidate's phone lives on THEIR OWN profile, not
+ * this one (a child's own <phones> block is always empty), so a caller
+ * fetches individual_profile_from_id again for whichever candidate's id it
+ * wants to try. Returns [] when the profile is unreadable or has no family.
  */
-export function parseIndividualGuardian(xmlText: string): Guardian | null {
+export function parseGuardianCandidates(xmlText: string): GuardianCandidate[] {
   let parsed: any;
   try {
     parsed = parser.parse(xmlText);
   } catch {
-    return null;
+    return [];
   }
   const response = parsed?.ccb_api?.response;
-  if (!response || response.errors) return null;
+  if (!response || response.errors) return [];
 
   const indiv = toArray<any>(response.individuals?.individual)[0];
-  if (!indiv) return null;
+  if (!indiv) return [];
 
   const position = (m: any) => String(m?.family_position ?? '').trim().toLowerCase();
   const members = toArray<any>(indiv.family_members?.family_member);
-  const adult =
-    members.find((m) => position(m) === 'primary contact') ||
-    members.find((m) => position(m) === 'spouse') ||
-    members.find((m) => position(m) && position(m) !== 'child');
-  // A family member's name is the text of its <individual> tag as one combined
-  // string (e.g. "Wayne Aaland"), not separate first_name/last_name fields.
-  // Split on the first space so the usual first-name-plus-last-initial privacy
-  // formatting still applies.
-  const fullName = adult ? nodeText(adult.individual) : '';
-  const [adultFirst, ...rest] = fullName.split(/\s+/).filter(Boolean);
-  const guardian = adult ? formatName(adultFirst ?? '', rest.join(' ')) : '';
+  const ordered = [
+    ...members.filter((m) => position(m) === 'primary contact'),
+    ...members.filter((m) => position(m) === 'spouse'),
+    ...members.filter(
+      (m) => position(m) && position(m) !== 'child' && position(m) !== 'primary contact' && position(m) !== 'spouse',
+    ),
+  ];
+  return ordered.map(candidateFromMember).filter((c): c is GuardianCandidate => c !== null);
+}
 
-  const phone = bestPhone(indiv.phones);
-
-  if (!guardian && !phone) return null;
-  return { guardian, phone };
+/**
+ * Pull the best phone off ANY individual's own individual_profile_from_id
+ * response (an adult's, typically). Prefers a mobile, then contact/home/work.
+ */
+export function parseOwnPhone(xmlText: string): string {
+  let parsed: any;
+  try {
+    parsed = parser.parse(xmlText);
+  } catch {
+    return '';
+  }
+  const response = parsed?.ccb_api?.response;
+  if (!response || response.errors) return '';
+  const indiv = toArray<any>(response.individuals?.individual)[0];
+  return indiv ? bestPhone(indiv.phones) : '';
 }
 
 function bestPhone(phonesNode: any): string {
@@ -500,62 +532,98 @@ export async function diagnoseNoOccurrence(eventId: string): Promise<Record<stri
   };
 }
 
-async function fetchIndividualGuardian(childId: string): Promise<Guardian | null> {
-  const base = apiBase();
-  if (!base || !/^\d+$/.test(String(childId))) return null;
-  const url = `${base.url}?srv=individual_profile_from_id&individual_id=${encodeURIComponent(childId)}`;
+// One individual_profile_from_id call, by individual_id (not "id" -- that is
+// the one service that uses a differently named parameter).
+async function fetchProfileXml(base: { url: string; auth: string }, individualId: string): Promise<string> {
+  const url = `${base.url}?srv=individual_profile_from_id&individual_id=${encodeURIComponent(individualId)}`;
   const res = await fetch(url, {
     headers: { Authorization: `Basic ${base.auth}` },
     cache: 'no-store',
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
   });
   if (res.status !== 200) throw new Error('individual_profile_from_id HTTP ' + res.status);
-  return parseIndividualGuardian(await res.text());
+  return res.text();
+}
+
+// A child's own profile never carries a phone (they are minors), so finding
+// the parent to contact takes two calls: read the child's profile for the
+// family, then read whichever adult's OWN profile for their phone. If the
+// top-priority adult (normally Primary Contact) has none on file, try the
+// next one (Spouse, then anyone else) rather than come back empty.
+async function fetchIndividualGuardian(childId: string): Promise<Guardian | null> {
+  const base = apiBase();
+  if (!base || !/^\d+$/.test(String(childId))) return null;
+
+  const candidates = parseGuardianCandidates(await fetchProfileXml(base, childId));
+  if (!candidates.length) return null;
+
+  let guardian = candidates[0].name;
+  let phone = '';
+  for (const c of candidates) {
+    if (!c.id) continue;
+    try {
+      const found = parseOwnPhone(await fetchProfileXml(base, c.id));
+      if (found) {
+        guardian = c.name;
+        phone = found;
+        break;
+      }
+    } catch {
+      // This adult's profile did not load; try the next candidate.
+    }
+  }
+
+  if (!guardian && !phone) return null;
+  return { guardian, phone };
 }
 
 /**
- * Temporary setup diagnostic: raw individual_profile_from_id reply for one
- * child id, plus what our own parser extracted from it, so a real-world shape
- * mismatch (a family_position label or phone type we did not expect) is
- * visible instead of guessed at. Only call with an id the caller already
- * knows, since a family's name/phone is real personal data.
+ * Temporary setup diagnostic: runs the same two-step guardian lookup
+ * (child's family list, then each adult's own phone) as production, but
+ * reports every step, since a real-world shape mismatch (a family_position
+ * label or phone type not expected) is worth seeing directly instead of
+ * guessed at. Only call with an id the caller already knows, since a
+ * family's name/phone is real personal data.
  */
 export async function diagnoseGuardianRaw(childId: string): Promise<Record<string, unknown>> {
   const base = apiBase();
   if (!base) return { configured: false };
   if (!/^\d+$/.test(String(childId))) return { configured: true, invalidChildId: String(childId) };
 
-  const url = `${base.url}?srv=individual_profile_from_id&individual_id=${encodeURIComponent(childId)}`;
-  let body: string;
-  let status: number;
+  let childBody: string;
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Basic ${base.auth}` },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
-    });
-    status = res.status;
-    body = await res.text();
+    childBody = await fetchProfileXml(base, childId);
   } catch (err) {
-    return { childId, status: 0, error: String((err as Error)?.message ?? err) };
+    return { childId, error: String((err as Error)?.message ?? err) };
   }
 
-  const errorMatch = body.match(/<error\b[^>]*>([^<]*)<\/error>/i);
-  if (errorMatch) return { childId, status, ccbError: errorMatch[1].trim() };
+  const errorMatch = childBody.match(/<error\b[^>]*>([^<]*)<\/error>/i);
+  if (errorMatch) return { childId, ccbError: errorMatch[1].trim() };
 
-  // Pull out whatever phone-ish section exists, wherever it falls in the
-  // document, since the response is long and a fixed head slice can cut it
-  // off before reaching it (as it did here: addresses come first).
-  const phoneIdx = body.search(/<[a-z_]*phone[a-z_]*[ >]/i);
-  const phoneSnippet = phoneIdx >= 0 ? body.slice(phoneIdx, phoneIdx + 1500) : undefined;
+  const candidates = parseGuardianCandidates(childBody);
+  const attempts: Array<Record<string, unknown>> = [];
+  let guardian = candidates[0]?.name ?? '';
+  let phone = '';
 
-  return {
-    childId,
-    status,
-    parsedResult: parseIndividualGuardian(body),
-    phoneSnippet,
-    raw: body.slice(0, 4000),
-  };
+  for (const c of candidates) {
+    if (!c.id) {
+      attempts.push({ ...c, note: 'no id on this family_member' });
+      continue;
+    }
+    try {
+      const body = await fetchProfileXml(base, c.id);
+      const found = parseOwnPhone(body);
+      attempts.push({ ...c, phoneFound: found || null });
+      if (found && !phone) {
+        guardian = c.name;
+        phone = found;
+      }
+    } catch (err) {
+      attempts.push({ ...c, error: String((err as Error)?.message ?? err) });
+    }
+  }
+
+  return { childId, candidates, attempts, finalResult: { guardian, phone } };
 }
 
 // A child's guardian rarely changes, so cache lookups for hours. Each child is
