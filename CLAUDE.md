@@ -42,12 +42,25 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
 
 ## How it works (key files)
 - `lib/ccb.ts` — CCB client. `attendance_profile` per event id (merged for
-  combined rooms), `individual_profile_from_id` for the guardian name+phone
-  (cached ~6h). Occurrence defaults to today in America/Chicago.
+  combined rooms). Guardian contact is a TWO-STEP lookup via
+  `individual_profile_from_id` (param is `individual_id`, not `id`): fetch the
+  child's profile for `family_members` (each is
+  `<individual id="X">Full Name</individual>`, one combined name, not
+  first_name/last_name), then fetch THAT adult's own profile for their phone
+  (a child's own `<phones>` is always empty). Falls back Primary Contact →
+  Spouse → other if the first has no phone on file. Cached ~6h per child.
+  Occurrence defaults to today in America/Chicago.
 - `lib/rooms.ts` — room config (ids arrays). `lib/paging.ts` — Clearstream send
-  (`api.getclearstream.com/v1/messages`, X-Api-Key, message_header/body/to),
-  confirm-tap gated (no PIN), dry-run until key present. `lib/phone.ts` — E.164.
-- `app/api/roster/route.ts` — GET roster JSON (+ temporary `?debug=1`).
+  (`api.getclearstream.com/v1/messages`, X-Api-Key, form fields
+  `message_header`, `message_body`, `subscribers[]` — plural array, NOT
+  `to`/`subscriber`/`contacts`; the alternative to `subscribers` is `lists`,
+  unused here), confirm-tap gated (no PIN), dry-run until key present.
+  `lib/phone.ts` — E.164.
+- `app/api/roster/route.ts` — GET roster JSON. Temporary diagnostics:
+  `?debug=1` (date scan), `?debug=2` (event_profile occurrence dump, needs
+  that service permission), `?debug=3` (attendance_profile with no
+  occurrence), `?debugGuardian=<individual id>` (runs the real two-step
+  guardian lookup, reports every attempt).
   `app/api/page/route.ts` — POST paging.
 - `app/room/[room]/page.tsx`, `components/RoomBoard.tsx` — the display (auto
   refresh 20s, "Text parent" button, "Rooms" back link, auto-reload on deploy).
@@ -59,9 +72,40 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
   A mid-week test check-in files under the NEXT meeting occurrence, not today.
 - CCB has no send-text API; UniFi Talk has none either; Clearstream is the sender.
 
+## CCB API v1 gotchas (confirmed against the church's live account)
+- Parameter is `id` for `attendance_profile` and `event_profile`, but
+  `individual_id` for `individual_profile_from_id`. Not consistent, verify per
+  service before assuming.
+- Each API user has its own PER-SERVICE permission checklist (ChMS Settings >
+  API). A service you haven't checked returns HTTP 200 with an error body
+  (`Service Permission`, number 110), not a 401/403 — parse the XML, don't
+  trust the status code alone.
+- `family_member`'s name is `<individual id="X">Full Name</individual>`, one
+  string with the id as an attribute. Not first_name/last_name fields (that
+  was my first wrong guess).
+- A child's own profile never has a phone (they're minors) — the parent's
+  phone is only on THAT adult's own profile. Two fetches, not one.
+- "No attendance records for event X occurrence Y" is CCB's way of saying an
+  empty room, not an error — no `<response>`, just a top-level `<messages>`.
+- The CCB Edit-API-user screen with the service checkboxes may not be
+  reachable by clicking the user in Settings > API > Users; the direct URL
+  pattern was `.../api_user_privileges.php?ax=edit&api_user_id=<n>`.
+
+## Clearstream API gotchas
+- Endpoint `POST https://api.getclearstream.com/v1/messages`, header
+  `X-Api-Key`. It's list-based (built for texting a saved subscriber list), so
+  a one-off send needs `subscribers[]` (array, one or more numbers) as the
+  alternative to `lists` (array of saved list ids) — never `to`.
+- Its 422 validation errors are structured JSON and name the exact field:
+  `{"error":{"message":"...","fields":{"lists":["..."],"subscribers":["The
+  subscribers field is required when lists is not present."]}}}`. Surface
+  that text back to the caller (it holds no secret), it will tell you the fix
+  directly rather than needing another guess.
+
 ## TODO / temporary
-- `?debug=1` date-scan diagnostic in `app/api/roster/route.ts` is TEMPORARY.
-  Remove it after Sunday's live check-in is verified working.
+- The four `debug=`/`debugGuardian=` diagnostics in `app/api/roster/route.ts`
+  are TEMPORARY. Remove them once Sunday's live check-in and a real page send
+  are both confirmed working.
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at
