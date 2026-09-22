@@ -6,6 +6,13 @@
  * child with a parent/guardian contact pulled from individual_profile_from_id.
  * Credentials come from environment variables and never reach the browser.
  *
+ * Today's occurrence is not just guessed as a bare date: event_profile is
+ * asked what occurrence(s) actually exist for today (cached briefly) and
+ * every one found is queried and merged, so an ad hoc occurrence added to
+ * test on a non-Sunday (which CCB may key with a specific time) still shows
+ * up, not just the normal weekly meeting. The bare-date guess is always
+ * included too, so this only ever adds coverage, never loses it.
+ *
  * Confirmed attendance_profile response shape:
  *   <ccb_api><response>
  *     <events count="1">
@@ -395,6 +402,50 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
   return parseAttendance(body, occ);
 }
 
+// Whether CCB has more than one occurrence today for an event -- its normal
+// weekly meeting, plus perhaps an ad hoc one added to test on a non-Sunday --
+// is asked via event_profile and cached briefly, so the 20s roster poll does
+// not re-fetch it every time. Today's plain date is always included in the
+// result too, so this can only ever ADD occurrences CCB confirms exist; it
+// never loses the guess that already worked for a normal Sunday meeting.
+const OCCURRENCE_TTL_MS = 3 * 60 * 1000;
+const occurrenceCache = new Map<string, { at: number; dates: string[] }>();
+
+async function occurrencesForToday(eventId: string, today: string): Promise<string[]> {
+  const cacheKey = `${eventId}_${today}`;
+  const hit = occurrenceCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < OCCURRENCE_TTL_MS) return hit.dates;
+
+  const result = new Set<string>([today]);
+  const base = apiBase();
+  if (base) {
+    try {
+      const url = `${base.url}?srv=event_profile&id=${encodeURIComponent(eventId)}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Basic ${base.auth}` },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
+      });
+      if (res.status === 200) {
+        const body = await res.text();
+        if (!/<error\b/i.test(body)) {
+          for (const d of body.match(/\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?/g) ?? []) {
+            if (d.startsWith(today)) result.add(d);
+          }
+        }
+      }
+    } catch {
+      // event_profile not permitted, or ChMS hiccup: the plain date guess
+      // already in `result` is exactly what would have been used before this.
+    }
+  }
+
+  const dates = [...result];
+  if (occurrenceCache.size > 500) occurrenceCache.clear();
+  occurrenceCache.set(cacheKey, { at: Date.now(), dates });
+  return dates;
+}
+
 /**
  * Temporary setup diagnostic: for one event, scan recent dates and report how
  * many attendance records ChMS holds for each (counts only, never names), so a
@@ -715,26 +766,36 @@ function demoRoster(eventId: string, occ: string): RosterOk {
   };
 }
 
-async function getSingleRoster(eventId: string, occ: string): Promise<RosterResult> {
+async function getSingleRoster(eventId: string, occ: string, explicit: boolean): Promise<RosterResult> {
   // Preview without ChMS. Off unless DEMO_MODE=true.
   if (process.env.DEMO_MODE === 'true') {
     return demoRoster(eventId, occ);
   }
 
-  const key = `${eventId}_${occ}`;
+  // A caller-specified occurrence (a diagnostic, or a deliberate past-date
+  // lookup) is used exactly as given. Otherwise today's plain date is only a
+  // guess, so also ask CCB what occurrence(s) it actually has scheduled for
+  // today, in case this event's meeting -- the normal one, or an ad hoc one
+  // set up to test on a non-Sunday -- is keyed with a specific time.
+  const occs = explicit ? [occ] : await occurrencesForToday(eventId, occ.slice(0, 10));
 
+  const key = `${eventId}_${occs.join('|')}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
     return { ...hit.data, cached: true };
   }
 
-  const data = await fetchRoster(eventId, occ);
-  if (!isError(data)) {
-    await enrichWithGuardians(data);
-    // Guard against unbounded growth in a long-lived warm instance.
-    if (cache.size > CACHE_MAX) cache.clear();
-    cache.set(key, { at: Date.now(), data });
+  const fetched = await Promise.all(occs.map((o) => fetchRoster(eventId, o)));
+  const oks = fetched.filter((r): r is RosterOk => !isError(r));
+  if (!oks.length) {
+    return (fetched.find((r) => isError(r)) as RosterError) ?? { error: 'ChMS returned an error.' };
   }
+  const data = oks.length === 1 ? oks[0] : mergeRosters(oks, occ);
+
+  await enrichWithGuardians(data);
+  // Guard against unbounded growth in a long-lived warm instance.
+  if (cache.size > CACHE_MAX) cache.clear();
+  cache.set(key, { at: Date.now(), data });
   return data;
 }
 
@@ -768,6 +829,7 @@ export function mergeRosters(rosters: RosterOk[], occurrence: string): RosterOk 
  * commas for a combined room, in which case their check-ins are merged.
  */
 export async function getRoster(roomParam: string, occurrence?: string): Promise<RosterResult> {
+  const explicit = isValidOccurrence(String(occurrence ?? '').trim());
   const occ = normalizeOccurrence(occurrence);
   const ids = String(roomParam)
     .split(',')
@@ -775,10 +837,10 @@ export async function getRoster(roomParam: string, occurrence?: string): Promise
     .filter(Boolean);
 
   if (ids.length <= 1) {
-    return getSingleRoster(ids[0] ?? String(roomParam), occ);
+    return getSingleRoster(ids[0] ?? String(roomParam), occ, explicit);
   }
 
-  const results = await Promise.all(ids.map((id) => getSingleRoster(id, occ)));
+  const results = await Promise.all(ids.map((id) => getSingleRoster(id, occ, explicit)));
   const oks = results.filter((r): r is RosterOk => !isError(r));
   if (!oks.length) {
     // Every combined event errored (e.g. bad credentials); surface the first.

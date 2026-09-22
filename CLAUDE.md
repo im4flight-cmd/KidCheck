@@ -42,7 +42,14 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
 
 ## How it works (key files)
 - `lib/ccb.ts` — CCB client. `attendance_profile` per event id (merged for
-  combined rooms). Guardian contact is a TWO-STEP lookup via
+  combined rooms). The occurrence for "today" is not just guessed as a bare
+  date: `event_profile` is asked what occurrence(s) actually exist for today
+  (cached ~3 min) and every one found is queried and merged, so an ad hoc
+  occurrence added to test on a non-Sunday (CCB may key it with a specific
+  time) shows up too, not just the normal weekly meeting. The bare-date guess
+  is always included in the set, so this only ever adds coverage. An explicit
+  `?occurrence=` (diagnostics, a deliberate past-date lookup) bypasses this
+  and is used exactly as given. Guardian contact is a TWO-STEP lookup via
   `individual_profile_from_id` (param is `individual_id`, not `id`): fetch the
   child's profile for `family_members` (each is
   `<individual id="X">Full Name</individual>`, one combined name, not
@@ -68,8 +75,17 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
   (CFC navy/gold, Lato/Lora fonts). `reference/apps-script/` is the old prototype.
 
 ## Known behavior, not bugs
-- No service today (e.g. a weekday) = "No one checked in yet" is correct.
-  A mid-week test check-in files under the NEXT meeting occurrence, not today.
+- As of 2026-09-22, an occurrence CCB actually has scheduled for today (any
+  time of day, not just a bare midnight date) is queried automatically, so
+  testing a check-in on a non-Sunday works as long as it was added as a real
+  occurrence on one of the tracked event ids (see rooms.json). If a same-day
+  test check-in still doesn't show, the likely cause reverts to the earlier
+  known failure mode: it was checked into a DIFFERENT, disconnected ChMS
+  event/object entirely, not one of the ids this app tracks (this happened
+  once before, a generic "Mikes Test event" with no Event Room, unrelated to
+  any real classroom). Confirm which event id the check-in actually landed
+  on with `?debugGuardian=` (for the child) or by checking ChMS's own
+  Check-In Status Report, not by assuming the app is broken.
 - CCB has no send-text API; UniFi Talk has none either; Clearstream is the sender.
 
 ## CCB API v1 gotchas (confirmed against the church's live account)

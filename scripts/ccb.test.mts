@@ -14,6 +14,7 @@ import {
   normalizeOccurrence,
   isError,
   fetchRoster,
+  getRoster,
   mergeRosters,
 } from '../lib/ccb.ts';
 import { toE164 } from '../lib/phone.ts';
@@ -224,6 +225,32 @@ test('fetchRoster reports a not_configured code when credentials are missing', a
     assert.equal(r.code, 'not_configured');
     assert.match(r.error, /CCB_SUBDOMAIN/);
   }
+});
+
+test('getRoster reports a not_configured error when credentials are missing (single room)', async () => {
+  delete process.env.CCB_SUBDOMAIN;
+  delete process.env.CCB_API_USER;
+  delete process.env.CCB_API_PASS;
+  const r = await getRoster('101');
+  assert.ok(isError(r));
+  if (isError(r)) assert.equal(r.code, 'not_configured');
+});
+
+test('getRoster reports an error when credentials are missing (combined room)', async () => {
+  delete process.env.CCB_SUBDOMAIN;
+  delete process.env.CCB_API_USER;
+  delete process.env.CCB_API_PASS;
+  const r = await getRoster('101,102,103');
+  assert.ok(isError(r));
+});
+
+test('getRoster respects an explicit occurrence without guessing today', async () => {
+  delete process.env.CCB_SUBDOMAIN;
+  delete process.env.CCB_API_USER;
+  delete process.env.CCB_API_PASS;
+  const r = await getRoster('101', '2026-01-04');
+  assert.ok(isError(r));
+  if (isError(r)) assert.equal(r.code, 'not_configured');
 });
 
 test('toE164 normalizes US numbers and passes international through', () => {
