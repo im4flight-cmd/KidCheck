@@ -463,11 +463,13 @@ export async function diagnoseEventDates(
   const [y, m, d] = today.split('-').map(Number);
   const start = new Date(Date.UTC(y, m - 1, d, 12)); // noon UTC avoids day rollover
 
-  const results: Array<{ date: string; records: number; note: string }> = [];
+  const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const results: Array<{ date: string; weekday: string; records: number; note: string }> = [];
   for (let i = 0; i < days; i++) {
     const day = new Date(start);
     day.setUTCDate(start.getUTCDate() - i);
     const date = day.toISOString().slice(0, 10);
+    const weekday = WEEKDAYS[day.getUTCDay()];
     const url =
       `${base.url}?srv=attendance_profile&id=${encodeURIComponent(eventId)}` +
       `&occurrence=${date}`;
@@ -479,9 +481,9 @@ export async function diagnoseEventDates(
       });
       const body = await res.text();
       const records = (body.match(/<attendee\b/gi) || []).length;
-      results.push({ date, records, note: /no attendance records/i.test(body) ? 'no records' : '' });
+      results.push({ date, weekday, records, note: /no attendance records/i.test(body) ? 'no records' : '' });
     } catch {
-      results.push({ date, records: -1, note: 'fetch error' });
+      results.push({ date, weekday, records: -1, note: 'fetch error' });
     }
   }
   return { eventId, today, results };

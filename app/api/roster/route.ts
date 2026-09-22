@@ -34,8 +34,12 @@ export async function GET(req: NextRequest) {
 
   // Temporary setup diagnostic: /api/roster?room=<single event id>&debug=1
   // reports how many attendance records ChMS has per recent date (no names).
+  // Optional &days=<n> widens the scan past the 8 day default (e.g. days=15
+  // covers two full weeks); capped at 31 so a typo can't trigger a huge scan.
   if (req.nextUrl.searchParams.get('debug') === '1') {
-    const info = await diagnoseEventDates(room);
+    const daysParam = Number(req.nextUrl.searchParams.get('days'));
+    const days = Number.isInteger(daysParam) && daysParam > 0 ? Math.min(daysParam, 31) : undefined;
+    const info = await diagnoseEventDates(room, days);
     return NextResponse.json(info, { headers: { 'Cache-Control': 'no-store' } });
   }
   // Temporary: /api/roster?room=<single event id>&debug=2 asks CCB what
