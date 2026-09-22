@@ -136,12 +136,19 @@ from Wayne pasting back a live URL's JSON, there is no way around this):
   2026-09-22 showed zero records on both checked Fridays (9/11, 9/18) and
   both checked Mondays (9/14, 9/21) — only the two Sundays had records (9 and
   13). So Bible study childcare is not filed under the Sunday nursery event.
-- **Still needed from Wayne**: does that childcare show up as its own
-  separate item in ChMS's check-in screen (distinct from Nursery/the Sunday
-  classes)? If so, get its event id the same way the other room ids were
-  originally found (the number in that group/event's URL in ChMS). If it's
-  not tracked in CCB at all for those sessions (e.g. a paper sign-in), there
-  is nothing for the app to find and this is not a code problem.
+- Wayne confirmed (2026-09-22): Women's Bible Study childcare uses
+  **"Classroom 4"**, a physical room name in ChMS. Unknown whether that maps
+  to a CCB event id already in `rooms.json` (physical rooms and named age
+  group events don't necessarily correspond 1:1) or a distinct event with its
+  own id.
+- **Still needed from Wayne**: open ChMS's check-in screen for a Friday or
+  Monday Bible study session and get the event id "Classroom 4" is tied to
+  from the URL, the same way the other room ids were originally found. If
+  it's a new id, add it to `rooms.json` with a name (e.g. "Women's Bible
+  Study") — a couple minutes of work once the id is known.
+- Also confirmed: Wayne's 2026-09-22 test check-in was not scheduled to any
+  tracked classroom at all (same root cause as the earlier "Mikes Test
+  event" incident) — not a bug, nothing to fix for that specific case.
 - If a real event id turns up, it just needs adding to `rooms.json` with a
   name; the 2026-09-22 occurrence-resolution fix (event_profile-backed, see
   above) should then make same-day check-ins show up with no further change.
