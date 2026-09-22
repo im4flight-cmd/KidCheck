@@ -64,10 +64,11 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
   unused here), confirm-tap gated (no PIN), dry-run until key present.
   `lib/phone.ts` — E.164.
 - `app/api/roster/route.ts` — GET roster JSON. Temporary diagnostics:
-  `?debug=1` (date scan), `?debug=2` (event_profile occurrence dump, needs
-  that service permission), `?debug=3` (attendance_profile with no
-  occurrence), `?debugGuardian=<individual id>` (runs the real two-step
-  guardian lookup, reports every attempt).
+  `?debug=1` (date scan, weekday-labeled, `&days=<n>` up to 31, default 8),
+  `?debug=2` (event_profile occurrence dump, needs that service permission),
+  `?debug=3` (attendance_profile with no occurrence), `?debugGuardian=
+  <individual id>` (runs the real two-step guardian lookup, reports every
+  attempt).
   `app/api/page/route.ts` — POST paging.
 - `app/room/[room]/page.tsx`, `components/RoomBoard.tsx` — the display (auto
   refresh 20s, "Text parent" button, "Rooms" back link, auto-reload on deploy).
@@ -122,6 +123,28 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
 - The four `debug=`/`debugGuardian=` diagnostics in `app/api/roster/route.ts`
   are TEMPORARY. Remove them once Sunday's live check-in and a real page send
   are both confirmed working.
+- Texting: last confirmed state is the `subscribers[]` fix (commit 39ce1d7),
+  but Wayne has not yet confirmed a real text actually arrived on a phone.
+  Pick this back up once he reports the result of trying "Text parent" again.
+
+## Open question: Women's Bible Study childcare (asked 2026-09-22)
+Wayne runs childcare Friday mornings and Monday nights for Women's Bible
+Study and wants the display to show those too. Unresolved because I have no
+CCB access from this sandbox (never have — every fact here has always come
+from Wayne pasting back a live URL's JSON, there is no way around this):
+- **Ask Wayne first**: does that childcare check kids into one of the 5 rooms
+  already in `rooms.json` (most likely Nursery, id 103), or a separate ChMS
+  event? If it's one of the 5, the 2026-09-22 occurrence-resolution fix
+  (event_profile-backed, see above) should already make it work with NO
+  further change. If it's a separate event, it just needs adding to
+  `rooms.json` with its event id and a name, once Wayne provides that id
+  (from the event's URL in ChMS, or by pasting `?debug=1&days=15` for the
+  room in question — that scan is now weekday-labeled specifically so a
+  Friday/Monday pattern is easy to spot).
+- Do not guess or invent a CCB "list all events" service; none has been
+  confirmed to exist in this project. If a listing service turns out to be
+  needed, it requires either real API docs or a live trial against Wayne's
+  account, not speculation.
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at
