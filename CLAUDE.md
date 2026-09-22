@@ -132,15 +132,19 @@ Wayne runs childcare Friday mornings and Monday nights for Women's Bible
 Study and wants the display to show those too. Unresolved because I have no
 CCB access from this sandbox (never have — every fact here has always come
 from Wayne pasting back a live URL's JSON, there is no way around this):
-- **Ask Wayne first**: does that childcare check kids into one of the 5 rooms
-  already in `rooms.json` (most likely Nursery, id 103), or a separate ChMS
-  event? If it's one of the 5, the 2026-09-22 occurrence-resolution fix
-  (event_profile-backed, see above) should already make it work with NO
-  further change. If it's a separate event, it just needs adding to
-  `rooms.json` with its event id and a name, once Wayne provides that id
-  (from the event's URL in ChMS, or by pasting `?debug=1&days=15` for the
-  room in question — that scan is now weekday-labeled specifically so a
-  Friday/Monday pattern is easy to spot).
+- **Ruled out**: room 103 (Nursery). `?room=103&debug=1&days=15` on
+  2026-09-22 showed zero records on both checked Fridays (9/11, 9/18) and
+  both checked Mondays (9/14, 9/21) — only the two Sundays had records (9 and
+  13). So Bible study childcare is not filed under the Sunday nursery event.
+- **Still needed from Wayne**: does that childcare show up as its own
+  separate item in ChMS's check-in screen (distinct from Nursery/the Sunday
+  classes)? If so, get its event id the same way the other room ids were
+  originally found (the number in that group/event's URL in ChMS). If it's
+  not tracked in CCB at all for those sessions (e.g. a paper sign-in), there
+  is nothing for the app to find and this is not a code problem.
+- If a real event id turns up, it just needs adding to `rooms.json` with a
+  name; the 2026-09-22 occurrence-resolution fix (event_profile-backed, see
+  above) should then make same-day check-ins show up with no further change.
 - Do not guess or invent a CCB "list all events" service; none has been
   confirmed to exist in this project. If a listing service turns out to be
   needed, it requires either real API docs or a live trial against Wayne's
