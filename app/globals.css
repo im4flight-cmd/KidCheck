@@ -303,6 +303,46 @@ a {
 .status:empty {
   display: none;
 }
+.live.viewing .dot {
+  background: var(--blue-bright);
+  animation: none;
+}
+.date-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+.today-btn {
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.today-btn:hover,
+.today-btn:focus-visible,
+.today-btn:active {
+  color: var(--gold);
+  border-color: var(--gold);
+  background: rgba(208, 176, 96, 0.08);
+}
+.date-picker {
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: rgba(244, 246, 250, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  color-scheme: dark;
+}
 .rooms-link {
   display: inline-flex;
   align-items: center;

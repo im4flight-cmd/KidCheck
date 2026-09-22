@@ -71,7 +71,9 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
   attempt).
   `app/api/page/route.ts` — POST paging.
 - `app/room/[room]/page.tsx`, `components/RoomBoard.tsx` — the display (auto
-  refresh 20s, "Text parent" button, "Rooms" back link, auto-reload on deploy).
+  refresh 20s, "Text parent" button, "Rooms" back link, auto-reload on deploy,
+  a date picker in the footer to look up a different day — picking one pauses
+  polling and hides paging, "Back to today" restores live mode).
 - `app/page.tsx` room picker, `app/error.tsx` boundary, `app/globals.css`
   (CFC navy/gold, Lato/Lora fonts). `reference/apps-script/` is the old prototype.
 

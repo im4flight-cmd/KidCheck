@@ -45,6 +45,21 @@ function ClockMark() {
   );
 }
 
+// Today in the viewer's own local time, only to cap the date picker so
+// nobody picks a future date that can't have check-ins yet. A soft UI guard,
+// not a security boundary, so the browser's own clock is good enough.
+function localToday(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function formatViewDate(occ: string): string {
+  const d = new Date(`${occ.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return occ;
+  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
 export default function RoomBoard({
   roomId,
   initialName,
@@ -64,6 +79,13 @@ export default function RoomBoard({
   const ctrlRef = useRef<AbortController | null>(null);
   const pageOpenRef = useRef(false);
 
+  // Empty = live, today, auto-refreshing. Set = a specific past day someone
+  // picked to look up, which stops polling and hides paging (texting a
+  // parent about a bygone check-in makes no sense).
+  const [viewOccurrence, setViewOccurrence] = useState(occurrence);
+  const viewingHistory = viewOccurrence !== '';
+  const canPage = paging && !viewingHistory;
+
   // Paging state
   const [pageTarget, setPageTarget] = useState<Attendee | null>(null);
   const [sending, setSending] = useState(false);
@@ -82,7 +104,7 @@ export default function RoomBoard({
     ctrlRef.current = ctrl;
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
-      const qs = occurrence ? `&occurrence=${encodeURIComponent(occurrence)}` : '';
+      const qs = viewOccurrence ? `&occurrence=${encodeURIComponent(viewOccurrence)}` : '';
       const res = await fetch(`/api/roster?room=${encodeURIComponent(roomId)}${qs}`, {
         cache: 'no-store',
         signal: ctrl.signal,
@@ -113,10 +135,13 @@ export default function RoomBoard({
       inFlight.current = false;
       setLoading(false);
     }
-  }, [roomId, occurrence]);
+  }, [roomId, viewOccurrence]);
 
   useEffect(() => {
     load();
+    // A past date someone picked to look up will never change, so there is
+    // nothing to poll for; only the live (today) view auto-refreshes.
+    if (viewingHistory) return;
     const id = setInterval(load, REFRESH_MS);
     const onVisible = () => {
       if (!document.hidden) load();
@@ -127,7 +152,7 @@ export default function RoomBoard({
       ctrlRef.current?.abort();
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [load]);
+  }, [load, viewingHistory]);
 
   const roomName = roster?.room || initialName || 'Classroom';
   const people = roster?.checkedIn ?? [];
@@ -203,7 +228,7 @@ export default function RoomBoard({
             <div className="state-text">Loading&hellip;</div>
           </div>
         ) : people.length > 0 ? (
-          <ul className={paging ? 'roster has-paging' : 'roster'}>
+          <ul className={canPage ? 'roster has-paging' : 'roster'}>
             {people.map((p) => (
               <li className="person" key={p.id || p.name}>
                 <span className="avatar" aria-hidden="true">
@@ -219,7 +244,7 @@ export default function RoomBoard({
                     </span>
                   )}
                 </span>
-                {paging && (
+                {canPage && (
                   <button
                     className="page-btn"
                     onClick={() => openPage(p)}
@@ -234,8 +259,14 @@ export default function RoomBoard({
         ) : roster ? (
           <div className="state">
             <CheckMark />
-            <div className="state-text">No kids checked in at this time</div>
-            <div className="state-sub">Names appear here the moment a child is checked into this room.</div>
+            <div className="state-text">
+              {viewingHistory ? `No kids were checked in on ${formatViewDate(viewOccurrence)}` : 'No kids checked in at this time'}
+            </div>
+            <div className="state-sub">
+              {viewingHistory
+                ? 'Either nobody met that day, or it was not checked in through ChMS.'
+                : 'Names appear here the moment a child is checked into this room.'}
+            </div>
           </div>
         ) : notConfigured ? (
           <div className="state">
@@ -257,16 +288,38 @@ export default function RoomBoard({
 
       <footer className="board-footer">
         <Link href="/" className="rooms-link" aria-label="Back to the room list">‹ Back to rooms</Link>
-        <span className={notConfigured ? 'live setup' : stale ? 'live stale' : 'live'}>
-          <span className="dot" />
-          {notConfigured
-            ? 'Waiting for setup'
-            : stale
-              ? 'Reconnecting'
-              : `Live, updates every ${Math.round(REFRESH_MS / 1000)}s`}
+        {viewingHistory ? (
+          <span className="live viewing">
+            <span className="dot" />
+            {`Viewing ${formatViewDate(viewOccurrence)} · not live`}
+          </span>
+        ) : (
+          <span className={notConfigured ? 'live setup' : stale ? 'live stale' : 'live'}>
+            <span className="dot" />
+            {notConfigured
+              ? 'Waiting for setup'
+              : stale
+                ? 'Reconnecting'
+                : `Live, updates every ${Math.round(REFRESH_MS / 1000)}s`}
+          </span>
+        )}
+        <span className="updated">{!viewingHistory && updated ? `Updated ${updated}` : ''}</span>
+        <span className="status">{!viewingHistory && stale ? status : ''}</span>
+        <span className="date-controls">
+          {viewingHistory && (
+            <button className="today-btn" onClick={() => setViewOccurrence('')}>
+              Back to today
+            </button>
+          )}
+          <input
+            type="date"
+            className="date-picker"
+            value={viewingHistory ? viewOccurrence.slice(0, 10) : ''}
+            max={localToday()}
+            onChange={(e) => setViewOccurrence(e.target.value)}
+            aria-label="View a different day"
+          />
         </span>
-        <span className="updated">{updated ? `Updated ${updated}` : ''}</span>
-        <span className="status">{stale ? status : ''}</span>
       </footer>
 
       {pageTarget && (

@@ -13,7 +13,11 @@ never reach the iPad.
 
 - **Room picker** (`/`): a tap to open list of classrooms. No typing event ids.
 - **Classroom display** (`/room/<eventId>`): the big, auto refreshing roster for
-  one room, styled in CFC navy and gold with the church logo.
+  one room, styled in CFC navy and gold with the church logo. A date picker in
+  the footer looks up a different day (any check-in on record, not just
+  today); picking one pauses auto refresh and hides "Text parent" (texting a
+  parent about a bygone check-in makes no sense), with one tap back to the
+  live view.
 
 ## How it works
 
