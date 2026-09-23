@@ -727,6 +727,94 @@ export async function diagnoseGuardianRaw(childId: string): Promise<Record<strin
   return { childId, candidates, attempts, finalResult: { guardian, phone } };
 }
 
+/**
+ * Temporary discovery probe: tries the hypothesized event_profiles (plural)
+ * LIST service, to see whether CCB can report every Children's Ministry
+ * event and its grouping/room/recurrence without every id being known and
+ * hard-coded in rooms.json first. Strictly read-only (a GET listing call);
+ * never anything that could send a notification or message through CCB.
+ *
+ * We do not yet know the real element/attribute names CCB uses for
+ * grouping, room, or recurrence, so this deliberately does NOT guess at
+ * them in code -- it returns the full raw parsed shape for two known
+ * reference events (103 Nursery, 158 Bible Study Kids) plus every event's
+ * raw fields, so the actual tag names are read directly off CCB's own
+ * response, not assumed.
+ *
+ * `extraParams` is forwarded straight through to the CCB call untouched
+ * (e.g. modified_since, page, per_page), since it is not yet known whether
+ * this service requires any filter/paging params -- if it does, CCB's own
+ * error will name it, the same way individual_id and occurrence were found.
+ */
+export async function diagnoseEventProfiles(
+  extraParams: Record<string, string>,
+): Promise<Record<string, unknown>> {
+  const base = apiBase();
+  if (!base) return { configured: false };
+
+  const qs = new URLSearchParams({ srv: 'event_profiles', ...extraParams });
+  const url = `${base.url}?${qs.toString()}`;
+
+  let body: string;
+  let status: number;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Basic ${base.auth}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
+    });
+    status = res.status;
+    body = await res.text();
+  } catch (err) {
+    return { url, status: 0, error: String((err as Error)?.message ?? err) };
+  }
+
+  const errorMatch = body.match(/<error\b[^>]*>([^<]*)<\/error>/i);
+  if (errorMatch) {
+    return { url, status, ccbError: errorMatch[1].trim(), rawSnippet: body.slice(0, 4000) };
+  }
+
+  let parsed: any;
+  try {
+    parsed = parser.parse(body);
+  } catch {
+    return { url, status, note: 'XML did not parse', rawSnippet: body.slice(0, 4000) };
+  }
+
+  const response = parsed?.ccb_api?.response;
+  if (!response) {
+    return {
+      url,
+      status,
+      note: 'No <response> element (possibly a <messages> reply, or a different wrapper entirely)',
+      topLevelKeys: parsed?.ccb_api ? Object.keys(parsed.ccb_api) : [],
+      rawSnippet: body.slice(0, 6000),
+    };
+  }
+
+  // We do not know the real wrapper/list element names yet, so try every
+  // plausible shape rather than assuming "events.event" like the singular
+  // event_profile call uses.
+  const container = response.events ?? response.event_profiles ?? response;
+  const rawList = container?.event ?? container?.event_profile ?? container;
+  const events = toArray<any>(rawList);
+
+  const idOf = (e: any): string => String(e?.['@_id'] ?? e?.id ?? '');
+  const ANCHOR_IDS = ['103', '158'];
+  const anchors = events.filter((e) => ANCHOR_IDS.includes(idOf(e)));
+  const compact = events.slice(0, 60).map((e) => ({ id: idOf(e), name: nodeText(e?.name), raw: e }));
+
+  return {
+    url,
+    status,
+    responseTopLevelKeys: Object.keys(response),
+    totalEventsFound: events.length,
+    anchors, // full raw shape for events 103 and 158, wherever they fall
+    compact, // id, name, and full raw fields for the first 60 events found
+    rawSnippet: body.slice(0, 8000),
+  };
+}
+
 // A child's guardian rarely changes, so cache lookups for hours. Each child is
 // then looked up at most once per service, keeping API load tiny.
 const GUARDIAN_TTL_MS = 6 * 60 * 60 * 1000;

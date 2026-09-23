@@ -162,16 +162,37 @@ incident, not a bug.
 On top of adding the room, the picker (`/`) now filters which rooms it shows
 by today's weekday (`roomMeetsOnWeekday`, see above), so Sundays show the 5
 age rooms and Fridays show Bible Study Kids automatically, without Wayne
-having to know which rooms apply which day. Auto-discovering a NEW,
-not-yet-added Children's Ministry event was explicitly requested "if
-practical" but deliberately not built — no confirmed CCB service for
-listing/searching events exists in this project; see the note under
-`lib/ccb.ts` above. A newly created recurring class/program is still a
-manual one-line `rooms.json` addition, same as 158 was.
+having to know which rooms apply which day.
 
-**Not yet verified by Wayne**: `?room=158&debug=1&days=15` should show the
-9/18 records (15 of them) once this deploys — that confirmation is still his
-to do, same as always.
+**Confirmed 2026-09-23 by Wayne**: `?room=158&debug=1&days=15` shows
+2026-09-18 Fri with 15 records. Live and working.
+
+## In progress: auto-discovery of new Children's Ministry events (2026-09-23)
+Wayne asked for the room list to include ANY Children's Ministry event
+occurring that day automatically, not just ones already in `rooms.json`,
+"if practical." Rather than guess at a CCB list/search service (the
+Clearstream field-name churn is exactly what this avoids), we are doing it
+evidence-first, same as every other fix in this project:
+
+- **Step 1 (shipped)**: `GET /api/discover?debug=1` (any extra query param,
+  e.g. `&modified_since=...&page=...`, is forwarded straight through to CCB
+  untouched) tries the hypothesized `event_profiles` (plural) LIST service
+  via `lib/ccb.ts`'s `diagnoseEventProfiles`. Deliberately does not guess at
+  field names in code -- it returns the full raw parsed shape for two known
+  reference events (103 Nursery, 158 Bible Study Kids) plus every event's
+  raw fields (id, name, everything else CCB sent), so the real tag names for
+  grouping/room/recurrence are read directly off CCB's response. Strictly a
+  GET listing call; nothing here can send a notification/message through
+  CCB. TEMPORARY, same as the other debug= routes.
+- **Still needed from Wayne**: open that URL and paste back what CCB
+  returns (works, an error naming a required param, or "invalid service" if
+  `event_profiles` does not exist at all).
+- **Step 2 (blocked on the above)**: once real field names are confirmed,
+  have the room picker merge rooms.json's explicit list (keeps friendly
+  names and order) with any discovered Children's Ministry event for the
+  selected day (using its own CCB name), keeping the existing fail-open
+  behavior and `/?all=1` override. Not started -- do not guess at this
+  either; wait for Wayne's paste.
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at
