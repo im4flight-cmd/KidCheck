@@ -16,6 +16,9 @@ type Roster = {
 const REFRESH_MS = 20000;
 const FETCH_TIMEOUT_MS = 15000;
 const TOAST_MS = 5000;
+const POLL_INTERVAL_MS = 3000;
+const POLL_TIMEOUT_MS = 60000;
+const DELIVERED_TOAST_MS = 8000;
 
 // The version this page was served as. Baked in at build time; compared against
 // the server's current build on each poll so a kiosk reloads itself after a
@@ -60,6 +63,10 @@ function formatViewDate(occ: string): string {
   return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export default function RoomBoard({
   roomId,
   initialName,
@@ -90,12 +97,26 @@ export default function RoomBoard({
   const [pageTarget, setPageTarget] = useState<Attendee | null>(null);
   const [sending, setSending] = useState(false);
   const [pageError, setPageError] = useState('');
-  const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'test' } | null>(null);
+  const [toast, setToast] = useState<{
+    text: string;
+    kind: 'ok' | 'test' | 'checking' | 'delivered' | 'failed';
+  } | null>(null);
+
+  // Bumped on every send so a delivery poll still running for a previous
+  // child stops updating the toast once a newer send (or unmount) supersedes it.
+  const pollTokenRef = useRef(0);
+  const mountedRef = useRef(true);
 
   // Track whether a paging modal is open so an auto-reload never interrupts it.
   useEffect(() => {
     pageOpenRef.current = pageTarget !== null;
   }, [pageTarget]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     if (inFlight.current) return; // never let polls stack up
@@ -168,6 +189,51 @@ export default function RoomBoard({
     setPageTarget(p);
   }
 
+  // Polls our own sanitized /api/page/status endpoint (never Clearstream
+  // directly) every ~3s for up to 60s after a real send. `token` is this
+  // send's snapshot of pollTokenRef, so a later send or an unmount makes this
+  // loop a no-op on its next wake instead of clobbering a newer toast.
+  async function pollDeliveryStatus(messageId: string, who: string, token: number) {
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await sleep(POLL_INTERVAL_MS);
+      if (!mountedRef.current || pollTokenRef.current !== token) return;
+      try {
+        const ctrl = new AbortController();
+        const t = window.setTimeout(() => ctrl.abort(), 8000);
+        const res = await fetch(`/api/page/status?id=${encodeURIComponent(messageId)}`, {
+          cache: 'no-store',
+          signal: ctrl.signal,
+        });
+        window.clearTimeout(t);
+        const json = await res.json();
+        if (!mountedRef.current || pollTokenRef.current !== token) return;
+        if (json?.delivered) {
+          setToast({ text: `Delivered. ${who} received the text.`, kind: 'delivered' });
+          window.setTimeout(() => {
+            if (pollTokenRef.current === token) setToast(null);
+          }, DELIVERED_TOAST_MS);
+          return;
+        }
+        if (json?.failed) {
+          const reason = json?.reason || 'the number could not receive texts';
+          setToast({ text: `Not delivered. ${reason}. Please find the parent another way.`, kind: 'failed' });
+          return; // Stays until the operator dismisses it.
+        }
+      } catch {
+        // Transient error reaching our own status endpoint; keep polling.
+      }
+    }
+    // No status after 60s: end quietly, same as if delivery confirmation
+    // did not exist. No amber/"not confirmed" state.
+    if (mountedRef.current && pollTokenRef.current === token) {
+      setToast({ text: `Text sent to ${who}.`, kind: 'ok' });
+      window.setTimeout(() => {
+        if (pollTokenRef.current === token) setToast(null);
+      }, TOAST_MS);
+    }
+  }
+
   async function sendPage() {
     if (!pageTarget) return;
     setSending(true);
@@ -182,15 +248,24 @@ export default function RoomBoard({
       if (json?.error) {
         setPageError(String(json.error));
       } else {
-        const who = json.guardian || 'the parent';
-        const text = json.throttled
-          ? `Already texted ${who} a moment ago`
-          : json.dryRun
-            ? `Test only: would text ${who} at ${json.toMasked}`
-            : `Text sent to ${who}`;
-        setToast({ text, kind: json.dryRun ? 'test' : 'ok' });
+        // The parent's own name when ChMS has it, otherwise the child's --
+        // never a generic "the parent" string.
+        const who = json.guardian || pageTarget.name;
+        if (json.throttled) {
+          setToast({ text: `Already texted ${who} a moment ago`, kind: 'test' });
+          window.setTimeout(() => setToast(null), TOAST_MS);
+        } else if (json.dryRun) {
+          setToast({ text: `Test only: would text ${who} at ${json.toMasked}`, kind: 'test' });
+          window.setTimeout(() => setToast(null), TOAST_MS);
+        } else if (json.messageId) {
+          pollTokenRef.current += 1;
+          setToast({ text: `Text sent to ${who}. Checking delivery...`, kind: 'checking' });
+          pollDeliveryStatus(String(json.messageId), who, pollTokenRef.current);
+        } else {
+          setToast({ text: `Text sent to ${who}`, kind: 'ok' });
+          window.setTimeout(() => setToast(null), TOAST_MS);
+        }
         setPageTarget(null);
-        window.setTimeout(() => setToast(null), TOAST_MS);
       }
     } catch {
       setPageError('Could not reach the text service.');
@@ -343,7 +418,17 @@ export default function RoomBoard({
         </div>
       )}
 
-      {toast && <div className={`toast toast-${toast.kind}`}>{toast.text}</div>}
+      {toast && (
+        <div className={`toast toast-${toast.kind}`}>
+          {toast.kind === 'checking' && <span className="toast-spinner" aria-hidden="true" />}
+          <span>{toast.text}</span>
+          {toast.kind === 'failed' && (
+            <button className="toast-dismiss" onClick={() => setToast(null)} aria-label="Dismiss">
+              ×
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

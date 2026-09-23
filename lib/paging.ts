@@ -26,51 +26,13 @@ const CLEARSTREAM_URL = 'https://api.getclearstream.com/v1/messages';
 const RESEND_BLOCK_MS = 60000;
 const lastSent = new Map<string, number>();
 
-// Temporary delivery-confirmation investigation (2026-09-23): a real send's
-// raw response, and one immediate read-only status lookup using whatever id
-// it contains, kept in memory so a debug GET can show them. Nothing here
-// ever sends a new text; this only records/reads what a real "Text parent"
-// tap already did. Vercel is serverless, so this can be empty if the debug
-// request lands on a different warm instance than the one that just sent --
-// trigger a real send, then open the debug URL right away.
-export type SendDebugRecord = {
-  at: string;
-  sendStatus: number;
-  sendRawBody: string;
-  extractedId?: string;
-  statusLookupUrl?: string;
-  statusLookupStatus?: number;
-  statusLookupRawBody?: string;
-  statusLookupError?: string;
-};
-const RECENT_SENDS_MAX = 10;
-const recentSends: SendDebugRecord[] = [];
-
-function recordSend(rec: SendDebugRecord) {
-  recentSends.unshift(rec);
-  if (recentSends.length > RECENT_SENDS_MAX) recentSends.length = RECENT_SENDS_MAX;
-}
-
-export function recentSendDebugLog(): SendDebugRecord[] {
-  return recentSends;
-}
-
-// Clearstream's send response shape for a successful send is not yet
-// confirmed, so this tries several plausible id-ish keys rather than
-// asserting one; the full raw body is always kept regardless, so nothing is
-// lost if none of these guesses match.
+// Clearstream's send response wraps the created message; tries a couple of
+// plausible shapes ({data: {...}} matching their confirmed list response,
+// or the object directly) rather than asserting just one.
 function extractMessageId(rawBody: string): string | undefined {
   try {
     const json = JSON.parse(rawBody);
-    const candidates = [
-      json?.id,
-      json?.message_id,
-      json?.messageId,
-      json?.uuid,
-      json?.data?.id,
-      json?.message?.id,
-      json?.data?.message_id,
-    ];
+    const candidates = [json?.data?.id, json?.id];
     const found = candidates.find((v) => v !== undefined && v !== null && v !== '');
     return found !== undefined ? String(found) : undefined;
   } catch {
@@ -78,55 +40,81 @@ function extractMessageId(rawBody: string): string | undefined {
   }
 }
 
-// Unconfirmed hypothesis, evidence-first: a REST-conventional detail lookup
-// for a resource created at POST .../v1/messages would be
-// GET .../v1/messages/<id>. A read-only GET; Clearstream's own response
-// (real data, or an error naming what's wrong) says whether this guess is
-// right, the same way individual_id and subscribers[] were confirmed for
-// CCB and Clearstream earlier in this project.
-async function lookupClearstreamStatus(
-  id: string,
-): Promise<{ url: string; status: number; rawBody?: string; error?: string }> {
-  const key = String(process.env.CLEARSTREAM_API_KEY ?? '');
-  const url = `${CLEARSTREAM_URL}/${encodeURIComponent(id)}`;
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'X-Api-Key': key, Accept: 'application/json' },
-      signal: AbortSignal.timeout(10000),
-    });
-    const rawBody = await res.text();
-    return { url, status: res.status, rawBody: rawBody.slice(0, 4000) };
-  } catch (err) {
-    return { url, status: 0, error: String((err as Error)?.message ?? err) };
-  }
-}
+export type ClearstreamMessageStatus = {
+  found: boolean;
+  status?: string;
+  delivered: boolean;
+  failed: boolean;
+  optedOut: boolean;
+  reason?: string;
+};
 
-// Read-only, and does not depend on this app's own in-memory send log
-// surviving (unlike recentSendDebugLog, which only lasts as long as the same
-// warm serverless instance): unconfirmed hypothesis, evidence-first, that a
-// plain GET on the same collection URL a send POSTs to returns a list of
-// recent messages, ideally with each one's own status. extraParams is
-// forwarded untouched in case Clearstream needs a filter/paging param --
-// its own error would name it, the same pattern used for CCB's
-// event_profiles. Never sends anything.
-export async function listRecentClearstreamMessages(
-  extraParams: Record<string, string>,
-): Promise<{ url: string; status: number; rawBody?: string; error?: string }> {
+// Read-only delivery-status check for a message THIS APP sent, by
+// Clearstream's own message id -- confirmed live 2026-09-23:
+// GET .../v1/messages/<id>, and the list endpoint GET .../v1/messages
+// ({data: [...]}), each message carrying stats {successful, failures,
+// opt_outs, ...} and completed_at. Tries the direct per-id lookup first;
+// falls back to searching the list for a matching id if that fails (a
+// message may not always be individually fetchable right away).
+//
+// SECURITY: Clearstream's raw response for either endpoint includes OTHER
+// people's contact details too (name, phone, email, signed URLs) -- a real
+// vulnerability found live 2026-09-23 (a since-removed debug probe exposed
+// this, unauthenticated, to anyone who found the URL). This function reads
+// that raw data only in server memory and returns solely the sanitized
+// shape below; it must never be changed to pass any subscriber/contact
+// field through to a caller.
+export async function checkClearstreamMessageStatus(id: string): Promise<ClearstreamMessageStatus> {
   const key = String(process.env.CLEARSTREAM_API_KEY ?? '');
-  const qs = new URLSearchParams(extraParams).toString();
-  const url = qs ? `${CLEARSTREAM_URL}?${qs}` : CLEARSTREAM_URL;
+  const notFound: ClearstreamMessageStatus = { found: false, delivered: false, failed: false, optedOut: false };
+  if (!key || !/^[\w-]+$/.test(id)) return notFound;
+
+  let msg: any = null;
   try {
-    const res = await fetch(url, {
+    const res = await fetch(`${CLEARSTREAM_URL}/${encodeURIComponent(id)}`, {
       method: 'GET',
       headers: { 'X-Api-Key': key, Accept: 'application/json' },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(8000),
     });
-    const rawBody = await res.text();
-    return { url, status: res.status, rawBody: rawBody.slice(0, 8000) };
-  } catch (err) {
-    return { url, status: 0, error: String((err as Error)?.message ?? err) };
+    if (res.status === 200) {
+      const json = await res.json().catch(() => null);
+      msg = json?.data ?? json;
+    }
+  } catch {
+    // fall through to the list search below
   }
+
+  if (!msg) {
+    try {
+      const res = await fetch(CLEARSTREAM_URL, {
+        method: 'GET',
+        headers: { 'X-Api-Key': key, Accept: 'application/json' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.status === 200) {
+        const json = await res.json().catch(() => null);
+        const list = Array.isArray(json?.data) ? json.data : [];
+        msg = list.find((m: any) => String(m?.id) === String(id)) ?? null;
+      }
+    } catch {
+      // leave msg null
+    }
+  }
+  if (!msg) return notFound;
+
+  const stats = msg?.stats ?? {};
+  const optedOut = Number(stats?.opt_outs ?? 0) >= 1;
+  const failed = optedOut || Number(stats?.failures ?? 0) >= 1;
+  const delivered = !failed && Number(stats?.successful ?? 0) >= 1 && !!msg?.completed_at;
+
+  return {
+    found: true,
+    status: typeof msg?.status === 'string' ? msg.status : undefined,
+    delivered,
+    failed,
+    optedOut,
+    reason: failed ? (optedOut ? 'parent has opted out of texts' : 'the number could not receive texts') : undefined,
+  };
 }
 
 export function pagingEnabled(): boolean {
@@ -148,7 +136,7 @@ function maskPhone(e164: string): string {
 }
 
 export type PageResult =
-  | { ok: true; dryRun: boolean; guardian: string; toMasked: string; throttled?: boolean }
+  | { ok: true; dryRun: boolean; guardian: string; toMasked: string; throttled?: boolean; messageId?: string }
   | { error: string };
 
 export async function sendPage(childId: string, room: string): Promise<PageResult> {
@@ -193,30 +181,16 @@ export async function sendPage(childId: string, room: string): Promise<PageResul
     // Surface Clearstream's own reason (it is not sensitive, no phone number
     // or key in it) so the exact fix is visible without a server log.
     const why = sent.detail ? `: ${sent.detail}` : '';
-    recordSend({ at: new Date().toISOString(), sendStatus: sent.status, sendRawBody: sent.rawBody ?? sent.detail ?? '' });
     return { error: `The text service did not accept the message (${sent.status || 'no response'})${why}` };
   }
   lastSent.set(childId, now);
 
-  // Temporary delivery-confirmation investigation: capture the real send's
-  // raw response, and -- read-only, no new text -- one immediate status
-  // lookup if a plausible message id was found in it. See recentSendDebugLog.
-  const record: SendDebugRecord = {
-    at: new Date().toISOString(),
-    sendStatus: sent.status,
-    sendRawBody: sent.rawBody ?? '',
-    extractedId: extractMessageId(sent.rawBody ?? ''),
-  };
-  if (record.extractedId) {
-    const looked = await lookupClearstreamStatus(record.extractedId);
-    record.statusLookupUrl = looked.url;
-    record.statusLookupStatus = looked.status;
-    record.statusLookupRawBody = looked.rawBody;
-    record.statusLookupError = looked.error;
-  }
-  recordSend(record);
+  // The display polls /api/page/status?id=<messageId> afterward to confirm
+  // delivery; that route re-fetches Clearstream itself and returns only a
+  // sanitized status, never raw contact data.
+  const messageId = extractMessageId(sent.rawBody ?? '');
 
-  return { ok: true, dryRun: false, guardian, toMasked: maskPhone(phone) };
+  return { ok: true, dryRun: false, guardian, toMasked: maskPhone(phone), messageId };
 }
 
 async function sendClearstream(

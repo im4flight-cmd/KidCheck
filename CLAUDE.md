@@ -86,13 +86,17 @@ page exactly as-is. `/?all=1` is a SEPARATE, richer page (see below), not a
   `to`/`subscriber`/`contacts`; the alternative to `subscribers` is `lists`,
   unused here), confirm-tap gated (no PIN), dry-run until key present.
   `lib/phone.ts` — E.164.
-- `app/api/roster/route.ts` — GET roster JSON. Temporary diagnostics:
-  `?debug=1` (date scan, weekday-labeled, `&days=<n>` up to 31, default 8),
-  `?debug=2` (event_profile occurrence dump, needs that service permission),
-  `?debug=3` (attendance_profile with no occurrence), `?debugGuardian=
-  <individual id>` (runs the real two-step guardian lookup, reports every
-  attempt).
-  `app/api/page/route.ts` — POST paging.
+- `app/api/roster/route.ts` — GET roster JSON. Temporary diagnostics (counts/
+  dates only, no names — re-verified safe 2026-09-23, see security section
+  below): `?debug=1` (date scan, weekday-labeled, `&days=<n>` up to 31,
+  default 8), `?debug=2` (event_profile occurrence dump, needs that service
+  permission), `?debug=3` (attendance_profile with no occurrence).
+  `?debugGuardian=` REMOVED 2026-09-23 (it dumped a real name + phone number,
+  unauthenticated — see security section below).
+  `app/api/page/route.ts` — POST paging, returns `messageId` on a real send.
+  `app/api/page/status/route.ts` — GET `?id=<messageId>`, polled by the
+  display for delivery confirmation; returns ONLY `{found, status, delivered,
+  failed, optedOut, reason}`, never Clearstream's raw contact data.
 - `app/room/[room]/page.tsx`, `components/RoomBoard.tsx` — the display (auto
   refresh 20s, "Text parent" button, "Rooms" back link, auto-reload on deploy,
   a date picker in the footer to look up a different day — picking one pauses
@@ -145,14 +149,13 @@ page exactly as-is. `/?all=1` is a SEPARATE, richer page (see below), not a
   directly rather than needing another guess.
 
 ## TODO / temporary
-- The four `debug=`/`debugGuardian=` diagnostics in `app/api/roster/route.ts`,
-  `/api/discover?debug=1` and `?debug=2`, and `/api/page?debug=1` are all
-  TEMPORARY. None removed yet — still actively useful for the in-progress
-  delivery-confirmation work below.
+- Remaining TEMPORARY diagnostics, all re-verified 2026-09-23 to return only
+  counts/dates/decision-reasons, never names/phones/contact data:
+  `/api/roster?debug=1/2/3`, `/api/discover?debug=2`. Fine to leave as-is.
 - **Confirmed 2026-09-23 by Wayne, live, end to end**: checked his son into a
   real test event (160), `/room/160` showed him live, and "Text parent"
-  actually sent ("Text sent to Wayne A."). Texting works. What's now open is
-  delivery CONFIRMATION (below), a separate, additive feature.
+  actually sent ("Text sent to Wayne A."). Texting works; the room-name bug
+  and delivery-confirmation feature below are both now resolved/built.
 
 ## Resolved: Women's Bible Study childcare (2026-09-22 → 2026-09-23)
 Wayne found it himself in ChMS's browser UI (I have no CCB access to have
@@ -313,61 +316,89 @@ before) and `/?all=1` (new 3-section layout); open a discovered/ad hoc
 event's live display and confirm the header now shows its real name instead
 of "Classroom".
 
-## In progress: Clearstream delivery confirmation (started 2026-09-23)
-Wayne wants to know not just that Clearstream ACCEPTED a send (today's "Text
-sent" toast), but whether the parent's phone actually got it. Evidence-first,
-same as the CCB discovery work -- do not guess Clearstream's status-lookup
-field names or endpoint.
+## Resolved: Clearstream delivery confirmation + a critical privacy fix (2026-09-23)
+Wayne wanted to know not just that Clearstream ACCEPTED a send, but whether
+the parent's phone actually got it. Evidence-first, same as the CCB
+discovery work: a read-only probe (`?debug=1`'s in-memory log, then
+`?debug=2` querying Clearstream's own message list directly) confirmed the
+real field shapes before anything was built on top of them.
 
-**Step 1 (shipped, probe only, no UI yet)**: `lib/paging.ts` now captures the
-FULL raw Clearstream response on a real send (previously discarded on
-success), tries to pull a message id out of it (`extractMessageId` -- tries
-several plausible key names, does not assume one), and if found, immediately
-makes ONE read-only status-lookup GET to the unconfirmed hypothesis
-`https://api.getclearstream.com/v1/messages/<id>` (REST-conventional, same
-pattern as the send URL). Both raw responses are kept in memory (last 10
-sends, this warm instance only) via `recordSend`/`recentSendDebugLog`.
-`GET /api/page?debug=1` reports them. Nothing here ever sends a new text --
-it only reads what a real "Text parent" tap already did.
-**Caveat**: Vercel is serverless; this in-memory log can be empty if the
-debug request lands on a different instance than the one that just sent, or
-if enough time passed that the instance recycled (confirmed 2026-09-23: a
-send at ~3:48pm was no longer checkable this way afterward). Trigger a real
-send, then open the debug URL right away.
+**Confirmed live (2026-09-23), Clearstream `GET /v1/messages` response
+shape**: 200 with `{data:[...]}`; each message has `id`, `status` ("SENT"),
+`type` ("SMS"), `number`, `sent_at`, `completed_at`, `text{full,header,body}`,
+`subscribers[phone]`, `contacts[...]`, `stats{recipients,successful,failures,
+throughput,replies,opt_outs,credits_used}`, `details_url`.
 
-**Step 1b (added 2026-09-23)**: `listRecentClearstreamMessages`, exposed as
-`GET /api/page?debug=2[&page=...&per_page=...]`, does NOT depend on the
-in-memory log above -- it asks Clearstream itself, a plain read-only GET on
-the same collection URL a send POSTs to (unconfirmed hypothesis: returns a
-list of recent messages). Extra query params are forwarded untouched in
-case Clearstream needs a filter/paging param. Added specifically so an
-EARLIER send (like the 3:48pm one) can still be checked. Never sends
-anything.
+**CRITICAL, now fixed: `/api/page?debug=2` was a live, unauthenticated
+privacy leak.** It returned Clearstream's raw message list -- names, phone
+numbers, emails, and signed URLs of unrelated people (other REACH
+recipients, not just this church's families) -- to anyone who opened the
+URL, no auth at all. Wayne caught it himself and asked for immediate
+removal. Fix (his call: remove entirely rather than gate-and-redact) --
+deleted every raw-passthrough debug route, not just this one, since the
+same mistake (probe returns an upstream API's response verbatim without
+considering it carries OTHER people's data) had been made more than once:
+- `app/api/page/route.ts` — removed `?debug=1` and `?debug=2` (both raw
+  Clearstream dumps). POST-only now.
+- `app/api/discover/route.ts` — removed `?debug=1` (raw `event_profiles`
+  dump; also carried an organizer phone number field). Kept `?debug=2`
+  (`diagnoseDiscoveryEligibility`: id/name/dates/reason only, no contact data).
+- `app/api/roster/route.ts` — removed `?debugGuardian=` (raw guardian
+  name + phone dump). Kept `?debug=1/2/3` (counts/dates only, re-verified
+  safe by inspection).
+- `lib/ccb.ts` — deleted `diagnoseGuardianRaw` and `diagnoseEventProfiles`
+  (their only callers were the two removed routes above; confirmed via grep
+  before deleting).
+- `lib/paging.ts` — deleted the old raw-dump plumbing (`recordSend`,
+  `recentSendDebugLog`, `lookupClearstreamStatus`, `listRecentClearstreamMessages`).
 
-**Still needed from Wayne**: open `kid-check-ashen.vercel.app/api/page?debug=2`
-and paste back what it shows. (`?debug=1` remains useful too, right after a
-BRAND NEW send specifically.)
+**Rule going forward**: any endpoint that reads Clearstream (or CCB) on
+behalf of the live display must be a narrow, sanitizing proxy from the
+start. Raw upstream responses stay in server memory only and never reach an
+HTTP response unfiltered — `checkClearstreamMessageStatus` (below) carries
+an explicit doc comment saying so, precisely because this is the mistake
+that caused the leak.
 
-**Step 2 (blocked on the above, do not build yet)**: once real field names
-are confirmed, build the actual UI, per Wayne's exact spec (CORRECTED
-2026-09-23 -- simpler than first recorded, no amber state, no card badge):
-- Right after tapping Send: a neutral toast/spinner, "Text sent to
-  <parent name>'s parent. Checking delivery..."
-- On Clearstream confirming delivery (poll status for up to ~60s): green
-  toast with a check mark, "Delivered. <parent name>'s parent received the
-  text.", visible ~8 seconds.
-- On Clearstream reporting failure: red toast, stays until dismissed,
-  "Not delivered. <plain reason, e.g. number opted out / invalid number>.
-  Please find the parent another way."
-- **No status after ~60s: end quietly on "Text sent to <parent name>."**
-  (drop the "Checking delivery..." wording and any special color -- just
-  settle there, no amber/"not confirmed yet" state at all).
-- **No card badge of any kind** ("Parent texted"/"Delivered" was the
-  original ask; Wayne dropped it). Only the toast sequence above, nothing
-  persisted onto the child's card.
-- Use the parent's name when available, fall back to the child's.
-- No new texts sent by any probe or test, ever, while building/verifying
-  this.
+**The real feature, built once field names were confirmed**: `sendPage`
+(`lib/paging.ts`) now returns `messageId` (pulled from the send response via
+`extractMessageId`) alongside the existing `guardian`/`toMasked`/`dryRun`
+fields. The display polls the new `GET /api/page/status?id=<messageId>`
+(`app/api/page/status/route.ts`) every ~3s for up to 60s
+(`checkClearstreamMessageStatus` in `lib/paging.ts` — tries `GET
+/v1/messages/<id>` first, falls back to searching the list). That function
+returns ONLY `{found, status, delivered, failed, optedOut, reason}`:
+`delivered` is `stats.successful >= 1 AND completed_at` set; `failed` is
+`stats.failures >= 1 OR stats.opt_outs >= 1` (`reason` is "parent has opted
+out of texts" for the opt-out case, else "the number could not receive
+texts"). Never touches subscriber/contact fields.
+
+**RoomBoard.tsx toast sequence** (`components/RoomBoard.tsx`, per Wayne's
+exact corrected spec — no amber state, no child-card badge, ever):
+- Right after a real send: `Text sent to {who}. Checking delivery...`
+  (neutral toast, spinner).
+- Delivered: `Delivered. {who} received the text.` (green, fades after ~8s).
+- Failed: `Not delivered. {reason}. Please find the parent another way.`
+  (red, stays until the operator taps its × to dismiss).
+- No status after 60s: ends quietly on `Text sent to {who}.` (same wording/
+  color as the no-messageId, dry-run, and throttled paths — no amber state,
+  ever).
+`{who}` is `guardian` from the send response, falling back to the child's
+own name — never a generic "the parent" string. A `pollTokenRef`
+cancellation token means a second send (or navigating away) stops a still-
+running poll from clobbering a newer toast.
+
+Verified this round: `npm run build` clean (new `/api/page/status` route
+registered, every removed debug route gone from the route list), `npm test`
+(34 passing), and all four toast states screenshotted in a headless browser
+against the app's real CSS (checking spinner, green delivered, red failed
+with its dismiss button, quiet green sent — all render as designed). Live
+Clearstream delivery itself can't be exercised from this sandbox (no
+egress) — that part is Wayne's to trigger.
+
+**Not yet verified by Wayne**: trigger a real "Text parent" send and watch
+the checking → delivered (or failed) toast sequence live; confirm
+`/api/page?debug=1`, `/api/page?debug=2`, `/api/discover?debug=1`, and
+`/api/roster?debugGuardian=` are all gone (400/404) on the live site.
 
 ## Fixed: outgoing text (and display header) could name an empty room (2026-09-23)
 Same root cause as the earlier header fix, but not fully covered by it: a

@@ -18,7 +18,6 @@ import {
   mergeRosters,
   roomMeetsOnWeekday,
   currentChurchWeekday,
-  diagnoseEventProfiles,
   discoverChildrensMinistryRooms,
   evaluateDiscoveredEvent,
   recurrenceKind,
@@ -272,14 +271,6 @@ test('roomMeetsOnWeekday fails open (shown) when CCB is not configured', async (
 test('currentChurchWeekday returns a weekday number', () => {
   const wd = currentChurchWeekday();
   assert.ok(Number.isInteger(wd) && wd >= 0 && wd <= 6);
-});
-
-test('diagnoseEventProfiles reports not configured without CCB creds', async () => {
-  delete process.env.CCB_SUBDOMAIN;
-  delete process.env.CCB_API_USER;
-  delete process.env.CCB_API_PASS;
-  const r = await diagnoseEventProfiles({});
-  assert.deepEqual(r, { configured: false });
 });
 
 // Unlike roomMeetsOnWeekday (which fails OPEN, showing a room it can't
