@@ -3,5 +3,6 @@
   { "ids": ["125", "114", "115"], "name": "3-5 Year Olds" },
   { "ids": ["116", "117"], "name": "K-1st Grade" },
   { "ids": ["118", "112", "119"], "name": "2nd-4th Grade" },
-  { "ids": ["120", "121"], "name": "5th-6th Grade" }
+  { "ids": ["120", "121"], "name": "5th-6th Grade" },
+  { "ids": ["158"], "name": "Bible Study Kids" }
 ]

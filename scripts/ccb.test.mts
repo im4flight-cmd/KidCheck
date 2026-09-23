@@ -16,6 +16,8 @@ import {
   fetchRoster,
   getRoster,
   mergeRosters,
+  roomMeetsOnWeekday,
+  currentChurchWeekday,
 } from '../lib/ccb.ts';
 import { toE164 } from '../lib/phone.ts';
 
@@ -251,6 +253,19 @@ test('getRoster respects an explicit occurrence without guessing today', async (
   const r = await getRoster('101', '2026-01-04');
   assert.ok(isError(r));
   if (isError(r)) assert.equal(r.code, 'not_configured');
+});
+
+test('roomMeetsOnWeekday fails open (shown) when CCB is not configured', async () => {
+  delete process.env.CCB_SUBDOMAIN;
+  delete process.env.CCB_API_USER;
+  delete process.env.CCB_API_PASS;
+  assert.equal(await roomMeetsOnWeekday(['103'], 0), true);
+  assert.equal(await roomMeetsOnWeekday(['125', '114', '115'], 5), true);
+});
+
+test('currentChurchWeekday returns a weekday number', () => {
+  const wd = currentChurchWeekday();
+  assert.ok(Number.isInteger(wd) && wd >= 0 && wd <= 6);
 });
 
 test('toE164 normalizes US numbers and passes international through', () => {

@@ -173,6 +173,21 @@ function todayInChurchTz(): string {
   }).format(new Date());
 }
 
+const WEEKDAY_NUM: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+// 0 (Sunday) .. 6 (Saturday), in the church's own timezone rather than the
+// server's (Vercel runs in UTC, which can be a different calendar day).
+function todayWeekdayInChurchTz(): number {
+  const tz = process.env.CHURCH_TIMEZONE || 'America/Chicago';
+  const short = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(new Date());
+  return WEEKDAY_NUM[short] ?? new Date().getDay();
+}
+
+function weekdayOf(dateStr: string): number {
+  const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay(); // noon UTC avoids day rollover
+}
+
 export function normalizeOccurrence(value: string | undefined): string {
   const v = String(value ?? '').trim();
   return isValidOccurrence(v) ? v : todayInChurchTz();
@@ -402,21 +417,19 @@ export async function fetchRoster(eventId: string, occurrence: string): Promise<
   return parseAttendance(body, occ);
 }
 
-// Whether CCB has more than one occurrence today for an event -- its normal
-// weekly meeting, plus perhaps an ad hoc one added to test on a non-Sunday --
-// is asked via event_profile and cached briefly, so the 20s roster poll does
-// not re-fetch it every time. Today's plain date is always included in the
-// result too, so this can only ever ADD occurrences CCB confirms exist; it
-// never loses the guess that already worked for a normal Sunday meeting.
-const OCCURRENCE_TTL_MS = 3 * 60 * 1000;
-const occurrenceCache = new Map<string, { at: number; dates: string[] }>();
+// event_profile's own occurrence dates for one event, cached briefly so
+// neither the 20s roster poll nor the room picker re-fetches it constantly.
+// null means "could not be determined" (no permission, ChMS hiccup, or CCB
+// not configured yet) -- distinct from an empty match list -- so callers can
+// fail open (assume a room is relevant) rather than wrongly hide something.
+const EVENT_PROFILE_TTL_MS = 3 * 60 * 1000;
+const eventProfileCache = new Map<string, { at: number; dates: string[] | null }>();
 
-async function occurrencesForToday(eventId: string, today: string): Promise<string[]> {
-  const cacheKey = `${eventId}_${today}`;
-  const hit = occurrenceCache.get(cacheKey);
-  if (hit && Date.now() - hit.at < OCCURRENCE_TTL_MS) return hit.dates;
+async function fetchEventProfileDates(eventId: string): Promise<string[] | null> {
+  const hit = eventProfileCache.get(eventId);
+  if (hit && Date.now() - hit.at < EVENT_PROFILE_TTL_MS) return hit.dates;
 
-  const result = new Set<string>([today]);
+  let dates: string[] | null = null;
   const base = apiBase();
   if (base) {
     try {
@@ -429,21 +442,56 @@ async function occurrencesForToday(eventId: string, today: string): Promise<stri
       if (res.status === 200) {
         const body = await res.text();
         if (!/<error\b/i.test(body)) {
-          for (const d of body.match(/\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?/g) ?? []) {
-            if (d.startsWith(today)) result.add(d);
-          }
+          dates = [...new Set(body.match(/\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?/g) ?? [])];
         }
       }
     } catch {
-      // event_profile not permitted, or ChMS hiccup: the plain date guess
-      // already in `result` is exactly what would have been used before this.
+      // event_profile not permitted, or a ChMS hiccup: leave dates as null.
     }
   }
 
-  const dates = [...result];
-  if (occurrenceCache.size > 500) occurrenceCache.clear();
-  occurrenceCache.set(cacheKey, { at: Date.now(), dates });
+  if (eventProfileCache.size > 500) eventProfileCache.clear();
+  eventProfileCache.set(eventId, { at: Date.now(), dates });
   return dates;
+}
+
+// Whether CCB has more than one occurrence today for an event -- its normal
+// weekly meeting, plus perhaps an ad hoc one added to test on a non-Sunday --
+// so the roster fetch checks every one found, not just a bare-date guess.
+// Today's plain date is always included in the result too, so this can only
+// ever ADD occurrences CCB confirms exist; it never loses the guess that
+// already worked for a normal Sunday meeting.
+async function occurrencesForToday(eventId: string, today: string): Promise<string[]> {
+  const result = new Set<string>([today]);
+  const dates = await fetchEventProfileDates(eventId);
+  if (dates) {
+    for (const d of dates) if (d.startsWith(today)) result.add(d);
+  }
+  return [...result];
+}
+
+/**
+ * Whether a room (one or more combined event ids) has a class scheduled on
+ * the given weekday (0=Sun..6=Sat), based on event_profile's own occurrence
+ * dates -- used to decide which rooms the picker shows for today (Sundays
+ * show the age group rooms, Fridays show Bible Study Kids, etc). Defaults to
+ * true (shown) when event_profile could not be read for ANY of the room's
+ * ids, since hiding a room a teacher actually needs would be a worse failure
+ * than showing one extra.
+ */
+export async function roomMeetsOnWeekday(ids: string[], weekday: number): Promise<boolean> {
+  let anyReadable = false;
+  for (const id of ids) {
+    const dates = await fetchEventProfileDates(id);
+    if (dates === null) continue;
+    anyReadable = true;
+    if (dates.some((d) => weekdayOf(d) === weekday)) return true;
+  }
+  return !anyReadable;
+}
+
+export function currentChurchWeekday(): number {
+  return todayWeekdayInChurchTz();
 }
 
 /**

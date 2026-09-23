@@ -125,6 +125,16 @@ Two ways, whichever is easier. The `ROOMS` variable wins when set.
 The `id` is the room's ChMS event id, the number in the event URL inside ChMS.
 It is set once per room and does not change week to week.
 
+### The picker only shows rooms meeting that day
+
+A room only appears on the picker (`/`) on days its ChMS event actually has a
+meeting scheduled, so, for example, a Sunday kids class and a Friday Bible
+study childcare room don't both clutter the list every day of the week. This
+is based on live ChMS data, so if it can't be checked (not configured yet, or
+a permission hiccup) a room shows anyway, rather than risk hiding one someone
+needs. `/?all=1` always shows every configured room regardless, as a
+manual override.
+
 ### Combining several classes into one display
 
 To show more than one ChMS event on a single screen (for example, the 3, 4, and

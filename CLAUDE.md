@@ -32,13 +32,22 @@ Vercel. Live at **kid-check-ashen.vercel.app**.
 ## Rooms (rooms.json, committed = source of truth)
 Schema is combined: `{ "ids": ["..."], "name": "..." }`. One display merges
 several ChMS events. Current:
-- Nursery [103]
-- 3-5 Year Olds [125,114,115]
-- K-1st Grade [116,117]
-- 2nd-4th Grade [118,112,119]
-- 5th-6th Grade [120,121]
+- Nursery [103] — Sundays
+- 3-5 Year Olds [125,114,115] — Sundays
+- K-1st Grade [116,117] — Sundays
+- 2nd-4th Grade [118,112,119] — Sundays
+- 5th-6th Grade [120,121] — Sundays
+- Bible Study Kids [158] — Fridays 8:30-11am, physical room "Classroom 2" in
+  ChMS, grouping "Children's Ministry". Added 2026-09-23. Event id 156 was
+  its one-off predecessor (2026-09-11 only, superseded by 158) — not tracked,
+  since it will never have another occurrence. No Monday event exists yet
+  (Wayne checked; Women's Bible Study meets Friday and Monday, but only
+  Friday has childcare check-in set up in CCB so far).
 Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
 %2C-encodes the comma and the route decodes it. Edit rooms here, not in Vercel.
+The room PICKER (`/`) only shows a room if its event has a meeting scheduled
+on today's weekday (see `roomMeetsOnWeekday` below) — `/?all=1` always shows
+every configured room regardless, as a manual override.
 
 ## How it works (key files)
 - `lib/ccb.ts` — CCB client. `attendance_profile` per event id (merged for
@@ -56,7 +65,17 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
   first_name/last_name), then fetch THAT adult's own profile for their phone
   (a child's own `<phones>` is always empty). Falls back Primary Contact →
   Spouse → other if the first has no phone on file. Cached ~6h per child.
-  Occurrence defaults to today in America/Chicago.
+  Occurrence defaults to today in America/Chicago. `roomMeetsOnWeekday(ids,
+  weekday)` (added 2026-09-23) shares the same event_profile cache: does any
+  id's event_profile list an occurrence on that weekday? Fails OPEN (true,
+  shown) when event_profile can't be read for ANY of the room's ids — hiding
+  a room a teacher needs is worse than showing one extra. `currentChurchWeekday()`
+  gives today's weekday (0=Sun) in America/Chicago, not the server's UTC day.
+  Deliberately NOT implemented: auto-discovering a Children's Ministry event
+  not yet in rooms.json. No CCB "list/search events" service has been
+  confirmed to exist in this project; guessing at one risks the same kind of
+  wrong-field-name churn the Clearstream integration went through. Adding a
+  newly created recurring class/program stays a manual `rooms.json` edit.
 - `lib/rooms.ts` — room config (ids arrays). `lib/paging.ts` — Clearstream send
   (`api.getclearstream.com/v1/messages`, X-Api-Key, form fields
   `message_header`, `message_body`, `subscribers[]` — plural array, NOT
@@ -129,35 +148,30 @@ Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
   but Wayne has not yet confirmed a real text actually arrived on a phone.
   Pick this back up once he reports the result of trying "Text parent" again.
 
-## Open question: Women's Bible Study childcare (asked 2026-09-22)
-Wayne runs childcare Friday mornings and Monday nights for Women's Bible
-Study and wants the display to show those too. Unresolved because I have no
-CCB access from this sandbox (never have — every fact here has always come
-from Wayne pasting back a live URL's JSON, there is no way around this):
-- **Ruled out**: room 103 (Nursery). `?room=103&debug=1&days=15` on
-  2026-09-22 showed zero records on both checked Fridays (9/11, 9/18) and
-  both checked Mondays (9/14, 9/21) — only the two Sundays had records (9 and
-  13). So Bible study childcare is not filed under the Sunday nursery event.
-- Wayne confirmed (2026-09-22): Women's Bible Study childcare uses
-  **"Classroom 4"**, a physical room name in ChMS. Unknown whether that maps
-  to a CCB event id already in `rooms.json` (physical rooms and named age
-  group events don't necessarily correspond 1:1) or a distinct event with its
-  own id.
-- **Still needed from Wayne**: open ChMS's check-in screen for a Friday or
-  Monday Bible study session and get the event id "Classroom 4" is tied to
-  from the URL, the same way the other room ids were originally found. If
-  it's a new id, add it to `rooms.json` with a name (e.g. "Women's Bible
-  Study") — a couple minutes of work once the id is known.
-- Also confirmed: Wayne's 2026-09-22 test check-in was not scheduled to any
-  tracked classroom at all (same root cause as the earlier "Mikes Test
-  event" incident) — not a bug, nothing to fix for that specific case.
-- If a real event id turns up, it just needs adding to `rooms.json` with a
-  name; the 2026-09-22 occurrence-resolution fix (event_profile-backed, see
-  above) should then make same-day check-ins show up with no further change.
-- Do not guess or invent a CCB "list all events" service; none has been
-  confirmed to exist in this project. If a listing service turns out to be
-  needed, it requires either real API docs or a live trial against Wayne's
-  account, not speculation.
+## Resolved: Women's Bible Study childcare (2026-09-22 → 2026-09-23)
+Wayne found it himself in ChMS's browser UI (I have no CCB access to have
+found it any other way): event id **158**, "Friday Women's Bible Study Kid
+Check", Fridays 8:30-11am, room "Classroom 2", grouping "Children's
+Ministry", 15 check-ins confirmed on 2026-09-18. Added as room "Bible Study
+Kids" in `rooms.json`. Predecessor id 156 (one-off, 2026-09-11, superseded by
+158) intentionally not tracked. No Monday event exists. Wayne's 2026-09-22
+test check-in (event 159) was confirmed to have no room and grouping
+"Regular Events" — same root cause as the earlier "Mikes Test event"
+incident, not a bug.
+
+On top of adding the room, the picker (`/`) now filters which rooms it shows
+by today's weekday (`roomMeetsOnWeekday`, see above), so Sundays show the 5
+age rooms and Fridays show Bible Study Kids automatically, without Wayne
+having to know which rooms apply which day. Auto-discovering a NEW,
+not-yet-added Children's Ministry event was explicitly requested "if
+practical" but deliberately not built — no confirmed CCB service for
+listing/searching events exists in this project; see the note under
+`lib/ccb.ts` above. A newly created recurring class/program is still a
+manual one-line `rooms.json` addition, same as 158 was.
+
+**Not yet verified by Wayne**: `?room=158&debug=1&days=15` should show the
+9/18 records (15 of them) once this deploys — that confirmation is still his
+to do, same as always.
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at

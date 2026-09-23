@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getRooms } from '@/lib/rooms';
+import { currentChurchWeekday, roomMeetsOnWeekday } from '@/lib/ccb';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,8 +12,27 @@ function Arrow() {
   );
 }
 
-export default function HomePage() {
-  const rooms = getRooms();
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ all?: string }>;
+}) {
+  const { all } = await searchParams;
+  const showAll = all === '1';
+  const allRooms = getRooms();
+  const weekday = currentChurchWeekday();
+  // Only show rooms that actually meet today (Sundays show the age group
+  // rooms, Fridays show Bible Study Kids, etc), based on each room's own
+  // event_profile schedule. Falls open to showing a room when that can't be
+  // determined (CCB not configured yet, demo mode, a permission hiccup), so
+  // this can only ever hide a room CCB positively confirms doesn't meet
+  // today, never one it simply couldn't check. "Show all classrooms" always
+  // bypasses this, so a wrong guess never fully strands anyone.
+  const eligible = showAll
+    ? allRooms.map(() => true)
+    : await Promise.all(allRooms.map((room) => roomMeetsOnWeekday(room.id.split(','), weekday)));
+  const rooms = allRooms.filter((_, i) => eligible[i]);
+  const someHidden = !showAll && rooms.length < allRooms.length;
 
   return (
     <main className="picker">
@@ -34,6 +54,11 @@ export default function HomePage() {
             </Link>
           ))}
         </div>
+      ) : allRooms.length > 0 ? (
+        <div className="setup">
+          <h2>No classes meet today</h2>
+          <p>None of the configured classrooms have a meeting scheduled today.</p>
+        </div>
       ) : (
         <div className="setup">
           <h2>No classrooms yet</h2>
@@ -48,6 +73,12 @@ export default function HomePage() {
             <code>rooms.example.json</code> for the shape.
           </p>
         </div>
+      )}
+
+      {(someHidden || (rooms.length === 0 && allRooms.length > 0)) && (
+        <p className="show-all">
+          <Link href="/?all=1">Show all classrooms</Link>
+        </p>
       )}
     </main>
   );

@@ -467,6 +467,18 @@ a {
   color: var(--muted);
   margin: 10px 0;
 }
+.show-all {
+  margin: 22px 0 0;
+  font-size: 14px;
+}
+.show-all a {
+  color: var(--muted);
+  text-decoration: underline;
+}
+.show-all a:hover,
+.show-all a:focus-visible {
+  color: var(--gold);
+}
 
 /* ---- Animations --------------------------------------------------------- */
 @keyframes pop {
