@@ -541,6 +541,16 @@ async function fetchAllEventProfiles(): Promise<any[]> {
   return events;
 }
 
+// The underlying calendar event's own name (e.g. "Friday Women's Bible
+// Study Kid Check"), not its check-in Room Name -- used only as a fallback
+// when attendance_profile's own room name is blank. Reuses the already
+// cached event_profiles list, so this costs nothing extra when warm.
+async function fallbackEventName(eventId: string): Promise<string> {
+  const events = await fetchAllEventProfiles();
+  const match = events.find((e) => String(e?.['@_id'] ?? e?.id ?? '') === eventId);
+  return match ? nodeText(match?.name) : '';
+}
+
 export type DiscoveredRoom = { id: string; name: string };
 
 export function currentChurchDate(): string {
@@ -1262,6 +1272,21 @@ async function getSingleRoster(eventId: string, occ: string, explicit: boolean):
   // other way to show.
   const data =
     oks.length === 1 ? oks[0] : { ...mergeRosters(oks, occ), room: oks.find((r) => r.room)?.room ?? '' };
+
+  // attendance_profile's own <name> (the check-in's assigned Room Name, e.g.
+  // "Classroom 2" for event 158) can be genuinely blank at the source, not
+  // just lost to a merge above -- confirmed live 2026-09-23, a real text
+  // went out naming no room at all, for an ad hoc/test event (159/160) whose
+  // check-in was never assigned a room ("Not specified" in ChMS's own
+  // admin UI). This is used for BOTH the display header and, since
+  // RoomBoard sends this same value as the paged message's {room}, the
+  // outgoing text -- so fixing it here fixes both at once. Falls back to
+  // the underlying calendar event's own name (event_profiles, already
+  // cached); rooms.json's configured label is the next fallback after that,
+  // applied by the caller (the display already does this via initialName).
+  if (!data.room) {
+    data.room = await fallbackEventName(eventId);
+  }
 
   await enrichWithGuardians(data);
   // Guard against unbounded growth in a long-lived warm instance.

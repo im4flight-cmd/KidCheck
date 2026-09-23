@@ -25,6 +25,7 @@ import {
   recurrenceUntilDate,
 } from '../lib/ccb.ts';
 import { toE164 } from '../lib/phone.ts';
+import { buildMessage } from '../lib/message.ts';
 
 const xml = (body: string) =>
   `<?xml version="1.0" encoding="UTF-8"?><ccb_api><response>${body}</response></ccb_api>`;
@@ -459,4 +460,16 @@ test('toE164 normalizes US numbers and passes international through', () => {
   assert.equal(toE164('1-210-555-0142'), '+12105550142');
   assert.equal(toE164('+44 20 7946 0958'), '+442079460958');
   assert.equal(toE164(''), '');
+});
+
+// Reproduces a real bug found live 2026-09-23: a text sent for an ad hoc
+// test event (159/160, whose check-in was never assigned a CCB Room Name)
+// named no room at all. buildMessage's own "the classroom" fallback is the
+// last line of defense -- this locks it in so a blank or whitespace-only
+// room can never reach an outgoing message again.
+test('buildMessage never sends a blank room', () => {
+  assert.match(buildMessage(''), /the classroom/);
+  assert.match(buildMessage('   '), /the classroom/);
+  assert.doesNotMatch(buildMessage(''), /to\s{2,}for/);
+  assert.match(buildMessage('Classroom 2'), /Classroom 2/);
 });

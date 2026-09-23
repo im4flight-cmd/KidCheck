@@ -339,7 +339,8 @@ send response, whether an id was found, and the raw status-lookup response
 or error).
 
 **Step 2 (blocked on the above, do not build yet)**: once real field names
-are confirmed, build the actual UI, per Wayne's exact spec:
+are confirmed, build the actual UI, per Wayne's exact spec (CORRECTED
+2026-09-23 -- simpler than first recorded, no amber state, no card badge):
 - Right after tapping Send: a neutral toast/spinner, "Text sent to
   <parent name>'s parent. Checking delivery..."
 - On Clearstream confirming delivery (poll status for up to ~60s): green
@@ -348,16 +349,45 @@ are confirmed, build the actual UI, per Wayne's exact spec:
 - On Clearstream reporting failure: red toast, stays until dismissed,
   "Not delivered. <plain reason, e.g. number opted out / invalid number>.
   Please find the parent another way."
-- No status after ~60s: amber toast, "Sent, but delivery not confirmed yet.
-  You may want to follow up."
-- Also mark the child's card itself with a small "Parent texted" /
-  "Delivered" badge plus the time, visible to a volunteer glancing at the
-  screen, and it must SURVIVE the 20s roster refresh (so it needs to live in
-  RoomBoard's own state, keyed by child id, not just derived from the
-  roster response each poll).
+- **No status after ~60s: end quietly on "Text sent to <parent name>."**
+  (drop the "Checking delivery..." wording and any special color -- just
+  settle there, no amber/"not confirmed yet" state at all).
+- **No card badge of any kind** ("Parent texted"/"Delivered" was the
+  original ask; Wayne dropped it). Only the toast sequence above, nothing
+  persisted onto the child's card.
 - Use the parent's name when available, fall back to the child's.
 - No new texts sent by any probe or test, ever, while building/verifying
   this.
+
+## Fixed: outgoing text (and display header) could name an empty room (2026-09-23)
+Same root cause as the earlier header fix, but not fully covered by it: a
+real text Wayne received today for an ad hoc test event named no room at
+all. `attendance_profile`'s own `<name>` (the check-in's assigned CCB Room
+Name, e.g. "Classroom 2" for event 158 -- confirmed live) can be genuinely
+BLANK at the source, not just lost to the earlier occurrence-merge bug: an
+ad hoc/test event (159/160) whose check-in was never assigned a room shows
+"Not specified" in ChMS's own admin UI, meaning `<name>` itself is empty.
+
+RoomBoard sends this same value as the paged message's `{room}`, so this
+was one bug with two symptoms (blank header, blank text), fixed once at the
+source: `getSingleRoster` (`lib/ccb.ts`) now falls back to the underlying
+calendar event's own name (`fallbackEventName`, via the already-cached
+`event_profiles` list) whenever `attendance_profile`'s room name is blank.
+Combined with the existing fallback chain, the full order is: CCB check-in
+Room Name → the event's own name → rooms.json's configured label
+(`initialName`, already handled on the display) → `buildMessage`'s own
+"the classroom" (`lib/message.ts`, extracted from `lib/paging.ts` so it has
+zero dependencies and is directly unit-tested; the same extraction fixed a
+`@/` path-alias resolution issue for the test runner).
+
+**Exact message template** (`PAGE_MESSAGE` env var, this is the default if
+unset): `Please come to {room} for your child at Country Faith Church.`
+`{room}` is replaced by the fallback chain above; never blank now, tested
+directly (`buildMessage never sends a blank room`).
+
+**Not yet verified by Wayne**: re-check into an ad hoc/test event and
+confirm both the live header and a real "Text parent" send now name the
+real room, never blank.
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at

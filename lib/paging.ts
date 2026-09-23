@@ -20,6 +20,7 @@
 
 import { fetchGuardian } from '@/lib/ccb';
 import { toE164 } from './phone';
+import { buildMessage } from './message';
 
 const CLEARSTREAM_URL = 'https://api.getclearstream.com/v1/messages';
 const RESEND_BLOCK_MS = 60000;
@@ -109,18 +110,9 @@ function senderHeader(): string {
   return String(process.env.PAGE_SENDER || 'Country Faith Church').slice(0, 30);
 }
 
-function messageTemplate(): string {
-  return String(process.env.PAGE_MESSAGE || 'Please come to {room} for your child at Country Faith Church.');
-}
-
 // Live only when a key is present and test mode is not forced on.
 function isLive(): boolean {
   return !!process.env.CLEARSTREAM_API_KEY && process.env.PAGING_TEST !== 'true';
-}
-
-export function buildMessage(room: string): string {
-  const r = String(room || '').trim() || 'the classroom';
-  return messageTemplate().replace(/\{room\}/g, r);
 }
 
 function maskPhone(e164: string): string {
