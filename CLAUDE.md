@@ -400,6 +400,31 @@ the checking → delivered (or failed) toast sequence live; confirm
 `/api/page?debug=1`, `/api/page?debug=2`, `/api/discover?debug=1`, and
 `/api/roster?debugGuardian=` are all gone (400/404) on the live site.
 
+**Full local UI regression pass (2026-09-23), since this sandbox can't hit
+the real Clearstream/CCB**: ran the built app locally (`next start`,
+`PAGING_ENABLED=true`) with `/api/roster`, `/api/page`, and
+`/api/page/status` mocked at the browser level (Playwright route
+interception), so the actual RoomBoard.tsx code ran for real, not a static
+mockup. Covered: delivered, failed+dismiss, dry-run, throttled, an error
+response surfaced in the modal, the date-picker history view (paging
+correctly hidden, "Back to today" restores it), and "Back to rooms". No
+console/page errors.
+
+Found and fixed one real bug this way: the "checking" toast and the 60s
+quiet-timeout toast both read `Text sent to Wayne A.. Checking
+delivery...` (double period) for any guardian name, because `formatName`
+(`lib/ccb.ts`) always renders guardians as "First L." with a trailing
+period. Fixed with a small `endSentence()` helper in `RoomBoard.tsx` that
+only appends "." when the string doesn't already end in one. Re-verified
+live after the fix: `Text sent to Sarah T. Checking delivery...` (single
+period, correct).
+
+**Noted, not fixed (likely out of scope)**: at a narrow phone-width
+viewport (~390px), the "Text parent" button label clips ("Text pa...").
+The real target is a landscape iPad kiosk, where it renders cleanly (this
+was screenshotted and confirmed) — flagging in case Wayne ever wants this
+viewed on a phone too, not treating it as a bug to fix on its own.
+
 ## Fixed: outgoing text (and display header) could name an empty room (2026-09-23)
 Same root cause as the earlier header fix, but not fully covered by it: a
 real text Wayne received today for an ad hoc test event named no room at

@@ -67,6 +67,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+// Guardian names are already period-terminated ("Wayne A.", the first-name-
+// plus-last-initial privacy format from lib/ccb.ts's formatName), so a toast
+// that just appends "." after {who} reads "Wayne A..". Avoids the double
+// period without needing to know which names do this.
+function endSentence(s: string): string {
+  return /[.!?]$/.test(s) ? s : `${s}.`;
+}
+
 export default function RoomBoard({
   roomId,
   initialName,
@@ -227,7 +235,7 @@ export default function RoomBoard({
     // No status after 60s: end quietly, same as if delivery confirmation
     // did not exist. No amber/"not confirmed" state.
     if (mountedRef.current && pollTokenRef.current === token) {
-      setToast({ text: `Text sent to ${who}.`, kind: 'ok' });
+      setToast({ text: endSentence(`Text sent to ${who}`), kind: 'ok' });
       window.setTimeout(() => {
         if (pollTokenRef.current === token) setToast(null);
       }, TOAST_MS);
@@ -259,7 +267,7 @@ export default function RoomBoard({
           window.setTimeout(() => setToast(null), TOAST_MS);
         } else if (json.messageId) {
           pollTokenRef.current += 1;
-          setToast({ text: `Text sent to ${who}. Checking delivery...`, kind: 'checking' });
+          setToast({ text: `${endSentence(`Text sent to ${who}`)} Checking delivery...`, kind: 'checking' });
           pollDeliveryStatus(String(json.messageId), who, pollTokenRef.current);
         } else {
           setToast({ text: `Text sent to ${who}`, kind: 'ok' });
