@@ -194,16 +194,57 @@ extra params. Confirmed live facts:
   real kids class, both would show. Not fixed unless Wayne reports it as an
   actual problem.
 
-Implementation (`lib/ccb.ts`): `discoverChildrensMinistryRooms(weekday,
+Implementation (`lib/ccb.ts`): `discoverChildrensMinistryRooms(targetDate,
 excludeIds)` fetches the full list (cached 5 min, `fetchAllEventProfiles`),
-filters to grouping id 6 minus anything already in rooms.json, then --
-unlike `roomMeetsOnWeekday`'s fail-OPEN default for admin-configured rooms
--- fails CLOSED per candidate: an event whose own `event_profile` occurrence
-can't be confirmed on the target weekday is left out, since adding an
-unverified discovered event is itself a bad outcome, the opposite of hiding
-a known-good room. `weekday: null` skips the day check entirely (used for
-`/?all=1`). `app/page.tsx` appends discovered rooms after rooms.json's own
-(which keep their friendly names and order).
+then `evaluateDiscoveredEvent` decides each candidate -- fails CLOSED, unlike
+`roomMeetsOnWeekday`'s fail-OPEN default for admin-configured rooms, since
+adding an unverified discovered event is a bad outcome, the opposite of
+hiding a known-good room. `targetDate: null` skips the day check entirely
+(used for `/?all=1`). `app/page.tsx` appends discovered rooms after
+rooms.json's own (which keep their friendly names and order).
+
+## Fixed: a one-time event wrongly recurring every week (found + fixed 2026-09-23)
+Wayne reported live: on Wed 2026-09-23 the picker showed exactly one room,
+"Lunch with the Pastors" (events 132/138), a ONE-TIME Children's Ministry
+event on Sun 2026-04-26. Nothing else showed (correct: none of the 6
+rooms.json rooms meet on a Wednesday), but this one-off event five months
+in the past should never have appeared at all.
+
+**Root cause**: the first `discoverChildrensMinistryRooms` swept every
+date-shaped string out of the event's raw XML (`fetchEventProfileDates`,
+built for classroom check-in events, where every date in the document really
+is a meeting occurrence) and checked if ANY matched today's weekday. A
+general CCB event carries other dates too (`created`, `modified`, etc.) that
+have nothing to do with when it meets -- one of "Lunch with the Pastors"'s
+happened to fall on a Wednesday, so it matched every Wednesday forever.
+
+**Fix**: `evaluateDiscoveredEvent(event, targetDate, excludeIds, groupingId)`
+uses the event's own structured fields directly instead -- `start_date` and
+`recurrence_description` (from the SAME `event_profiles` listing already
+fetched, no extra API call). `isWeeklyRecurring(text)` only trusts CCB's own
+confirmed wording ("Every week on ..."); anything else (blank, a one-time
+description) is treated as NOT recurring, the safer default. A one-time
+event only ever matches `targetDate === startDate` exactly; a weekly
+recurring one matches by weekday, but only from its own `start_date` onward.
+This does NOT touch `roomMeetsOnWeekday`/`occurrencesForToday` (rooms.json's
+own 6 rooms) -- those were not reported broken and are out of scope here.
+
+Also added: `GET /api/discover?debug=2[&date=YYYY-MM-DD]`
+(`diagnoseDiscoveryEligibility`), a TEMPORARY view of every grouping-6
+event's start_date/start_datetime/recurrence_description and its exact
+eligibility decision + reason, so a wrong inclusion or exclusion is visible
+directly. The empty-state heading is now the exact wording Wayne asked for,
+"No classrooms scheduled today", with the "Show all classrooms" link always
+available there.
+
+Regression tests added using 132/138-style fake data (a Sun 2026-04-26
+one-time event checked against a Wed and a later Sun) and 158-style data
+(a Friday recurring event checked against a later Friday, a Wednesday, and
+a not-yet-started date). 31 tests pass total.
+
+**Not yet verified by Wayne**: reload the picker (any day) and confirm no
+unexpected room shows; on a day nothing qualifies, confirm "No classrooms
+scheduled today" plus the Show all link appears instead.
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at

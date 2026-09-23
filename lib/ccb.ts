@@ -543,47 +543,161 @@ async function fetchAllEventProfiles(): Promise<any[]> {
 
 export type DiscoveredRoom = { id: string; name: string };
 
+export function currentChurchDate(): string {
+  return todayInChurchTz();
+}
+
+// CCB's own wording so far (confirmed live): "Every week on <Weekday> from
+// ... to ...". Deliberately narrow (must clearly say "week"), so anything
+// ambiguous or one-time is treated as NOT recurring -- the safer default,
+// since a one-time event wrongly treated as recurring would keep
+// reappearing indefinitely on its weekday, while a recurring event wrongly
+// treated as one-time merely needs a clearer recurrence_description to be
+// caught, a far smaller failure.
+export function isWeeklyRecurring(recurrenceDescription: string): boolean {
+  return /\bweek\b/i.test(recurrenceDescription);
+}
+
+export type DiscoveryDecision = {
+  id: string;
+  name: string;
+  startDate: string;
+  recurrenceDescription: string;
+  groupingId: string;
+  excluded: boolean;
+  eligible: boolean;
+  reason: string;
+};
+
+/**
+ * Whether one event_profiles (plural) entry belongs on the picker for
+ * `targetDate` (bare YYYY-MM-DD, church timezone). Uses the event's own
+ * structured `start_date` and `recurrence_description` fields directly,
+ * rather than a generic date sweep of the whole raw XML (that swept up
+ * unrelated dates like `created`/`modified` on a general event, and was the
+ * root cause of a one-time past event -- "Lunch with the Pastors", a single
+ * 2026-04-26 meeting -- wrongly matching every week on its weekday months
+ * later; found live 2026-09-23). A one-time event only ever matches its own
+ * exact start date; only an event whose own description says it repeats
+ * weekly is checked by weekday, and only from its own start date onward.
+ */
+export function evaluateDiscoveredEvent(
+  e: any,
+  targetDate: string,
+  excludeIds: Set<string>,
+  groupingId: string,
+): DiscoveryDecision {
+  const id = String(e?.['@_id'] ?? e?.id ?? '');
+  const name = nodeText(e?.name) || `Event ${id}`;
+  const startDate = nodeText(e?.start_date).slice(0, 10);
+  const recurrenceDescription = nodeText(e?.recurrence_description);
+  const gid = String(e?.event_grouping?.['@_id'] ?? '');
+  const base = { id, name, startDate, recurrenceDescription, groupingId: gid };
+
+  if (gid !== groupingId) {
+    return { ...base, excluded: false, eligible: false, reason: `not in grouping ${groupingId} (this is grouping ${gid || 'none'})` };
+  }
+  const excluded = excludeIds.has(id);
+  if (excluded) {
+    return { ...base, excluded, eligible: false, reason: 'already tracked in rooms.json' };
+  }
+  if (!isValidOccurrence(startDate)) {
+    return { ...base, excluded, eligible: false, reason: 'no usable start_date on record' };
+  }
+
+  if (!isWeeklyRecurring(recurrenceDescription)) {
+    const eligible = startDate === targetDate;
+    return {
+      ...base,
+      excluded,
+      eligible,
+      reason: eligible
+        ? `one-time event, matches its own start date ${startDate}`
+        : `one-time event, only occurs on ${startDate}, not ${targetDate}`,
+    };
+  }
+
+  const startWeekday = weekdayOf(startDate);
+  const targetWeekday = weekdayOf(targetDate);
+  if (targetDate < startDate) {
+    return { ...base, excluded, eligible: false, reason: `weekly recurring but has not started yet (starts ${startDate})` };
+  }
+  const eligible = startWeekday === targetWeekday;
+  return {
+    ...base,
+    excluded,
+    eligible,
+    reason: eligible
+      ? `weekly recurring, weekday matches (started ${startDate})`
+      : `weekly recurring on a different weekday (started ${startDate})`,
+  };
+}
+
 /**
  * Any Children's Ministry event (event_grouping id 6) not already tracked in
  * `excludeIds` (rooms.json's own ids), so a newly created recurring
  * class/program shows up on the picker without a manual rooms.json edit.
- * `weekday` null skips the day check entirely (used for the ?all=1 override);
- * otherwise only events with a real event_profile occurrence on that weekday
- * are included.
+ * `targetDate` null skips the day check entirely (used for the ?all=1
+ * override); otherwise only events `evaluateDiscoveredEvent` finds eligible
+ * for that exact date are included (see its doc comment for what changed
+ * and why).
  *
  * Some adult events share this same grouping (childcare offered alongside an
  * adult program, e.g. a leaders' meeting) -- confirmed live, a known and
- * accepted residual. The day-occurrence check is the only guard, per intent:
+ * accepted residual. The day/date check is the only guard, per intent:
  * matching by name or keyword would just be a different kind of guessing.
- *
- * Unlike rooms.json entries (which fail OPEN when unreadable, since an admin
- * already vouched for them), a discovered event that cannot be confirmed is
- * left OUT here: adding an unverified event is itself a bad outcome for
- * discovery, the opposite of hiding a known-good configured room.
  */
 export async function discoverChildrensMinistryRooms(
-  weekday: number | null,
+  targetDate: string | null,
   excludeIds: Set<string>,
 ): Promise<DiscoveredRoom[]> {
   const events = await fetchAllEventProfiles();
   const groupingId = childrensMinistryGroupingId();
-  const found: DiscoveredRoom[] = [];
 
-  for (const e of events) {
-    const id = String(e?.['@_id'] ?? e?.id ?? '');
-    if (!id || excludeIds.has(id)) continue;
-    const gid = e?.event_grouping?.['@_id'];
-    if (String(gid ?? '') !== groupingId) continue;
-
-    if (weekday !== null) {
-      const dates = await fetchEventProfileDates(id);
-      if (!dates || !dates.some((d) => weekdayOf(d) === weekday)) continue;
-    }
-
-    found.push({ id, name: nodeText(e?.name) || `Event ${id}` });
+  if (targetDate === null) {
+    return events
+      .filter((e) => {
+        const id = String(e?.['@_id'] ?? e?.id ?? '');
+        return id && !excludeIds.has(id) && String(e?.event_grouping?.['@_id'] ?? '') === groupingId;
+      })
+      .map((e) => ({ id: String(e['@_id'] ?? e.id), name: nodeText(e?.name) || `Event ${e['@_id'] ?? e.id}` }));
   }
 
-  return found;
+  return events
+    .map((e) => evaluateDiscoveredEvent(e, targetDate, excludeIds, groupingId))
+    .filter((d) => d.eligible)
+    .map((d) => ({ id: d.id, name: d.name }));
+}
+
+/**
+ * Debug view: every Children's Ministry (grouping id 6) event's own
+ * start_date/start_datetime/recurrence_description and the exact eligibility
+ * decision + reason for `targetDate`, so a wrong inclusion OR exclusion is
+ * visible directly instead of guessed at.
+ */
+export async function diagnoseDiscoveryEligibility(
+  targetDate: string,
+  excludeIds: Set<string>,
+): Promise<Record<string, unknown>> {
+  const base = apiBase();
+  if (!base) return { configured: false };
+
+  const groupingId = childrensMinistryGroupingId();
+  const events = await fetchAllEventProfiles();
+  const relevant = events.filter((e) => String(e?.event_grouping?.['@_id'] ?? '') === groupingId);
+  const decisions = relevant.map((e) => ({
+    ...evaluateDiscoveredEvent(e, targetDate, excludeIds, groupingId),
+    startDatetime: nodeText(e?.start_datetime),
+  }));
+
+  return {
+    targetDate,
+    targetWeekday: weekdayOf(targetDate),
+    groupingId,
+    totalEventsInGrouping: relevant.length,
+    eligibleCount: decisions.filter((d) => d.eligible).length,
+    decisions,
+  };
 }
 
 /**

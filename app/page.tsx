@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getRooms } from '@/lib/rooms';
-import { currentChurchWeekday, roomMeetsOnWeekday, discoverChildrensMinistryRooms } from '@/lib/ccb';
+import { currentChurchWeekday, currentChurchDate, roomMeetsOnWeekday, discoverChildrensMinistryRooms } from '@/lib/ccb';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +39,7 @@ export default async function HomePage({
   // a manual edit here. rooms.json's own rooms always keep their friendly
   // name and order; discovered ones are appended using CCB's own event name.
   const knownIds = new Set(allRooms.flatMap((r) => r.id.split(',')));
-  const discovered = await discoverChildrensMinistryRooms(showAll ? null : weekday, knownIds);
+  const discovered = await discoverChildrensMinistryRooms(showAll ? null : currentChurchDate(), knownIds);
   const rooms = [...configuredRooms, ...discovered];
 
   return (
@@ -64,8 +64,8 @@ export default async function HomePage({
         </div>
       ) : allRooms.length > 0 ? (
         <div className="setup">
-          <h2>No classes meet today</h2>
-          <p>None of the configured classrooms have a meeting scheduled today.</p>
+          <h2>No classrooms scheduled today</h2>
+          <p>None of the configured or discovered classrooms have a meeting scheduled today.</p>
         </div>
       ) : (
         <div className="setup">

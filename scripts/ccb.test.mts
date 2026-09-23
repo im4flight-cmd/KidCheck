@@ -20,6 +20,8 @@ import {
   currentChurchWeekday,
   diagnoseEventProfiles,
   discoverChildrensMinistryRooms,
+  evaluateDiscoveredEvent,
+  isWeeklyRecurring,
 } from '../lib/ccb.ts';
 import { toE164 } from '../lib/phone.ts';
 
@@ -286,8 +288,90 @@ test('discoverChildrensMinistryRooms finds nothing when CCB is not configured', 
   delete process.env.CCB_SUBDOMAIN;
   delete process.env.CCB_API_USER;
   delete process.env.CCB_API_PASS;
-  const found = await discoverChildrensMinistryRooms(5, new Set(['158']));
+  const found = await discoverChildrensMinistryRooms('2026-09-25', new Set(['158']));
   assert.deepEqual(found, []);
+});
+
+test('isWeeklyRecurring only matches CCB\'s own "every week" wording', () => {
+  assert.equal(isWeeklyRecurring('Every week on Friday from 8:30am to 11:00am'), true);
+  assert.equal(isWeeklyRecurring('Every week on Sunday from 10:00am to 12:00pm'), true);
+  assert.equal(isWeeklyRecurring(''), false);
+  assert.equal(isWeeklyRecurring('One time event on April 26, 2026 from 12:00pm to 1:00pm'), false);
+});
+
+// Reproduces the live bug found 2026-09-23: "Lunch with the Pastors" (events
+// 132/138), a one-time Children's Ministry event on Sun 2026-04-26, showed
+// up on Wed 2026-09-23 -- five months later, on an entirely different
+// weekday. Root cause: the old check swept every date-shaped string out of
+// the event's raw XML (created/modified timestamps and the like), not just
+// its real occurrence, so an unrelated date happening to fall on a
+// Wednesday made it match. evaluateDiscoveredEvent uses only the event's
+// own structured start_date and recurrence_description instead.
+test('a one-time event only matches its own exact start date, never by weekday', () => {
+  const lunchWithPastors = {
+    '@_id': '132',
+    name: 'Lunch with the Pastors',
+    start_date: '2026-04-26', // a Sunday
+    recurrence_description: 'One time event on April 26, 2026 from 12:00pm to 1:00pm',
+    event_grouping: { '#text': "Children's Ministry", '@_id': '6' },
+  };
+
+  // The exact reported failure: five months later, a Wednesday.
+  const onReportedDate = evaluateDiscoveredEvent(lunchWithPastors, '2026-09-23', new Set(), '6');
+  assert.equal(onReportedDate.eligible, false);
+
+  // Not even a LATER Sunday should match -- weekday alone is not enough for
+  // a one-time event, only its own exact date counts.
+  const onLaterSunday = evaluateDiscoveredEvent(lunchWithPastors, '2026-09-27', new Set(), '6');
+  assert.equal(onLaterSunday.eligible, false);
+
+  // Its own actual date does match.
+  const onItsOwnDate = evaluateDiscoveredEvent(lunchWithPastors, '2026-04-26', new Set(), '6');
+  assert.equal(onItsOwnDate.eligible, true);
+});
+
+test('a weekly recurring event matches every occurrence of its weekday, not just its start date', () => {
+  const bibleStudyKids = {
+    '@_id': '158',
+    name: 'Friday Women\'s Bible Study Kid Check',
+    start_date: '2026-09-04', // a Friday, 3 weeks before the target dates below
+    recurrence_description: 'Every week on Friday from 8:30am to 11:00am',
+    event_grouping: { '#text': "Children's Ministry", '@_id': '6' },
+  };
+
+  // A later Friday (not the start date itself) still matches.
+  const laterFriday = evaluateDiscoveredEvent(bibleStudyKids, '2026-09-25', new Set(), '6');
+  assert.equal(laterFriday.eligible, true);
+
+  // A Wednesday does not (this is Wayne's exact reported day).
+  const wednesday = evaluateDiscoveredEvent(bibleStudyKids, '2026-09-23', new Set(), '6');
+  assert.equal(wednesday.eligible, false);
+
+  // Before its own start date, even on the right weekday, it has not begun.
+  const notStartedYet = evaluateDiscoveredEvent(
+    { ...bibleStudyKids, start_date: '2026-10-02' },
+    '2026-09-25',
+    new Set(),
+    '6',
+  );
+  assert.equal(notStartedYet.eligible, false);
+  assert.match(notStartedYet.reason, /has not started yet/);
+});
+
+test('evaluateDiscoveredEvent excludes rooms.json ids and the wrong grouping', () => {
+  const e = {
+    '@_id': '158',
+    name: 'Friday Women\'s Bible Study Kid Check',
+    start_date: '2026-09-04',
+    recurrence_description: 'Every week on Friday from 8:30am to 11:00am',
+    event_grouping: { '#text': "Children's Ministry", '@_id': '6' },
+  };
+  const alreadyTracked = evaluateDiscoveredEvent(e, '2026-09-25', new Set(['158']), '6');
+  assert.equal(alreadyTracked.eligible, false);
+  assert.equal(alreadyTracked.excluded, true);
+
+  const wrongGrouping = evaluateDiscoveredEvent(e, '2026-09-25', new Set(), '99');
+  assert.equal(wrongGrouping.eligible, false);
 });
 
 test('toE164 normalizes US numbers and passes international through', () => {
