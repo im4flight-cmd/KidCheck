@@ -102,6 +102,33 @@ async function lookupClearstreamStatus(
   }
 }
 
+// Read-only, and does not depend on this app's own in-memory send log
+// surviving (unlike recentSendDebugLog, which only lasts as long as the same
+// warm serverless instance): unconfirmed hypothesis, evidence-first, that a
+// plain GET on the same collection URL a send POSTs to returns a list of
+// recent messages, ideally with each one's own status. extraParams is
+// forwarded untouched in case Clearstream needs a filter/paging param --
+// its own error would name it, the same pattern used for CCB's
+// event_profiles. Never sends anything.
+export async function listRecentClearstreamMessages(
+  extraParams: Record<string, string>,
+): Promise<{ url: string; status: number; rawBody?: string; error?: string }> {
+  const key = String(process.env.CLEARSTREAM_API_KEY ?? '');
+  const qs = new URLSearchParams(extraParams).toString();
+  const url = qs ? `${CLEARSTREAM_URL}?${qs}` : CLEARSTREAM_URL;
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-Api-Key': key, Accept: 'application/json' },
+      signal: AbortSignal.timeout(10000),
+    });
+    const rawBody = await res.text();
+    return { url, status: res.status, rawBody: rawBody.slice(0, 8000) };
+  } catch (err) {
+    return { url, status: 0, error: String((err as Error)?.message ?? err) };
+  }
+}
+
 export function pagingEnabled(): boolean {
   return process.env.PAGING_ENABLED === 'true';
 }

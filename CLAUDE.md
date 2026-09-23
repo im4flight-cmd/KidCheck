@@ -330,13 +330,23 @@ sends, this warm instance only) via `recordSend`/`recentSendDebugLog`.
 `GET /api/page?debug=1` reports them. Nothing here ever sends a new text --
 it only reads what a real "Text parent" tap already did.
 **Caveat**: Vercel is serverless; this in-memory log can be empty if the
-debug request lands on a different instance than the one that just sent.
-Trigger a real send, then open the debug URL right away.
+debug request lands on a different instance than the one that just sent, or
+if enough time passed that the instance recycled (confirmed 2026-09-23: a
+send at ~3:48pm was no longer checkable this way afterward). Trigger a real
+send, then open the debug URL right away.
 
-**Still needed from Wayne**: trigger a real "Text parent" send, then
-immediately open `/api/page?debug=1` and paste back what it shows (the raw
-send response, whether an id was found, and the raw status-lookup response
-or error).
+**Step 1b (added 2026-09-23)**: `listRecentClearstreamMessages`, exposed as
+`GET /api/page?debug=2[&page=...&per_page=...]`, does NOT depend on the
+in-memory log above -- it asks Clearstream itself, a plain read-only GET on
+the same collection URL a send POSTs to (unconfirmed hypothesis: returns a
+list of recent messages). Extra query params are forwarded untouched in
+case Clearstream needs a filter/paging param. Added specifically so an
+EARLIER send (like the 3:48pm one) can still be checked. Never sends
+anything.
+
+**Still needed from Wayne**: open `kid-check-ashen.vercel.app/api/page?debug=2`
+and paste back what it shows. (`?debug=1` remains useful too, right after a
+BRAND NEW send specifically.)
 
 **Step 2 (blocked on the above, do not build yet)**: once real field names
 are confirmed, build the actual UI, per Wayne's exact spec (CORRECTED
