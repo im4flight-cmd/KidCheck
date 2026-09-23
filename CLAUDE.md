@@ -167,32 +167,43 @@ having to know which rooms apply which day.
 **Confirmed 2026-09-23 by Wayne**: `?room=158&debug=1&days=15` shows
 2026-09-18 Fri with 15 records. Live and working.
 
-## In progress: auto-discovery of new Children's Ministry events (2026-09-23)
+## Resolved: auto-discovery of new Children's Ministry events (2026-09-23)
 Wayne asked for the room list to include ANY Children's Ministry event
-occurring that day automatically, not just ones already in `rooms.json`,
-"if practical." Rather than guess at a CCB list/search service (the
-Clearstream field-name churn is exactly what this avoids), we are doing it
-evidence-first, same as every other fix in this project:
+occurring that day automatically, not just ones already in `rooms.json`.
+Done evidence-first: Step 1 (`GET /api/discover?debug=1`, still there,
+harmless to keep) confirmed `srv=event_profiles` (plural) works with no
+extra params. Confirmed live facts:
+- Top-level `response` keys: `service, service_action, availability, events`.
+  List is `response.events.event`, 106 total (a probe MUST read all of them,
+  no cap -- an earlier 60-item cap in the diagnostic missed real ids and
+  Wayne caught it).
+- Per-event fields include: `name, start_datetime, recurrence_description,
+  exceptions, group, location, event_grouping, ...` plus more.
+  `event_grouping` is `{"#text":"Children's Ministry","@_id":"6"}` -- **match
+  by the `@_id` "6", never the text** (`CHILDRENS_MINISTRY_GROUPING_ID` env
+  var overrides it if the grouping is ever recreated with a new id).
+  There is no room/location field usable for a physical room name (event
+  158's `location` is just "Country Faith Church"); a discovered event's
+  display name is its own `name` field, e.g. "Friday Women's Bible Study Kid
+  Check", not a made-up room label.
+- **Known, accepted residual**: some ADULT events share grouping id 6 too
+  (childcare offered alongside them: Prophetic Ministry Night, Lunch with
+  the Pastors, Financial Peace, Life Group Leaders Meeting, Lift Night). The
+  day-occurrence check is the only guard (per Wayne's own instruction, not a
+  name/keyword heuristic) -- if one of these coincides on the same day as a
+  real kids class, both would show. Not fixed unless Wayne reports it as an
+  actual problem.
 
-- **Step 1 (shipped)**: `GET /api/discover?debug=1` (any extra query param,
-  e.g. `&modified_since=...&page=...`, is forwarded straight through to CCB
-  untouched) tries the hypothesized `event_profiles` (plural) LIST service
-  via `lib/ccb.ts`'s `diagnoseEventProfiles`. Deliberately does not guess at
-  field names in code -- it returns the full raw parsed shape for two known
-  reference events (103 Nursery, 158 Bible Study Kids) plus every event's
-  raw fields (id, name, everything else CCB sent), so the real tag names for
-  grouping/room/recurrence are read directly off CCB's response. Strictly a
-  GET listing call; nothing here can send a notification/message through
-  CCB. TEMPORARY, same as the other debug= routes.
-- **Still needed from Wayne**: open that URL and paste back what CCB
-  returns (works, an error naming a required param, or "invalid service" if
-  `event_profiles` does not exist at all).
-- **Step 2 (blocked on the above)**: once real field names are confirmed,
-  have the room picker merge rooms.json's explicit list (keeps friendly
-  names and order) with any discovered Children's Ministry event for the
-  selected day (using its own CCB name), keeping the existing fail-open
-  behavior and `/?all=1` override. Not started -- do not guess at this
-  either; wait for Wayne's paste.
+Implementation (`lib/ccb.ts`): `discoverChildrensMinistryRooms(weekday,
+excludeIds)` fetches the full list (cached 5 min, `fetchAllEventProfiles`),
+filters to grouping id 6 minus anything already in rooms.json, then --
+unlike `roomMeetsOnWeekday`'s fail-OPEN default for admin-configured rooms
+-- fails CLOSED per candidate: an event whose own `event_profile` occurrence
+can't be confirmed on the target weekday is left out, since adding an
+unverified discovered event is itself a bad outcome, the opposite of hiding
+a known-good room. `weekday: null` skips the day check entirely (used for
+`/?all=1`). `app/page.tsx` appends discovered rooms after rooms.json's own
+(which keep their friendly names and order).
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at

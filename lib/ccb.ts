@@ -494,6 +494,98 @@ export function currentChurchWeekday(): number {
   return todayWeekdayInChurchTz();
 }
 
+// Confirmed live 2026-09-23 via the event_profiles discovery probe:
+// "Children's Ministry" is event_grouping id 6 in this church's CCB account.
+// Overridable in case the grouping is ever deleted and recreated (CCB would
+// then assign it a new id).
+function childrensMinistryGroupingId(): string {
+  return String(process.env.CHILDRENS_MINISTRY_GROUPING_ID ?? '6');
+}
+
+// The full event_profiles (plural) listing -- confirmed live to need no
+// extra params -- refetched at most every 5 minutes, since the room picker
+// can be opened repeatedly across a service and this is a heavier call than
+// a single event_profile lookup.
+const EVENT_PROFILES_LIST_TTL_MS = 5 * 60 * 1000;
+let eventProfilesListCache: { at: number; events: unknown[] } | null = null;
+
+async function fetchAllEventProfiles(): Promise<any[]> {
+  if (eventProfilesListCache && Date.now() - eventProfilesListCache.at < EVENT_PROFILES_LIST_TTL_MS) {
+    return eventProfilesListCache.events as any[];
+  }
+
+  let events: any[] = [];
+  const base = apiBase();
+  if (base) {
+    try {
+      const url = `${base.url}?srv=event_profiles`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Basic ${base.auth}` },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(CCB_TIMEOUT_MS),
+      });
+      if (res.status === 200) {
+        const body = await res.text();
+        if (!/<error\b/i.test(body)) {
+          const parsed = parser.parse(body);
+          events = toArray<any>(parsed?.ccb_api?.response?.events?.event);
+        }
+      }
+    } catch {
+      // Leave events empty: discovery simply finds nothing extra this time,
+      // the same fail-open-by-omission behavior as the rest of this file.
+    }
+  }
+
+  eventProfilesListCache = { at: Date.now(), events };
+  return events;
+}
+
+export type DiscoveredRoom = { id: string; name: string };
+
+/**
+ * Any Children's Ministry event (event_grouping id 6) not already tracked in
+ * `excludeIds` (rooms.json's own ids), so a newly created recurring
+ * class/program shows up on the picker without a manual rooms.json edit.
+ * `weekday` null skips the day check entirely (used for the ?all=1 override);
+ * otherwise only events with a real event_profile occurrence on that weekday
+ * are included.
+ *
+ * Some adult events share this same grouping (childcare offered alongside an
+ * adult program, e.g. a leaders' meeting) -- confirmed live, a known and
+ * accepted residual. The day-occurrence check is the only guard, per intent:
+ * matching by name or keyword would just be a different kind of guessing.
+ *
+ * Unlike rooms.json entries (which fail OPEN when unreadable, since an admin
+ * already vouched for them), a discovered event that cannot be confirmed is
+ * left OUT here: adding an unverified event is itself a bad outcome for
+ * discovery, the opposite of hiding a known-good configured room.
+ */
+export async function discoverChildrensMinistryRooms(
+  weekday: number | null,
+  excludeIds: Set<string>,
+): Promise<DiscoveredRoom[]> {
+  const events = await fetchAllEventProfiles();
+  const groupingId = childrensMinistryGroupingId();
+  const found: DiscoveredRoom[] = [];
+
+  for (const e of events) {
+    const id = String(e?.['@_id'] ?? e?.id ?? '');
+    if (!id || excludeIds.has(id)) continue;
+    const gid = e?.event_grouping?.['@_id'];
+    if (String(gid ?? '') !== groupingId) continue;
+
+    if (weekday !== null) {
+      const dates = await fetchEventProfileDates(id);
+      if (!dates || !dates.some((d) => weekdayOf(d) === weekday)) continue;
+    }
+
+    found.push({ id, name: nodeText(e?.name) || `Event ${id}` });
+  }
+
+  return found;
+}
+
 /**
  * Temporary setup diagnostic: for one event, scan recent dates and report how
  * many attendance records ChMS holds for each (counts only, never names), so a

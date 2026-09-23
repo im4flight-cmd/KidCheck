@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getRooms } from '@/lib/rooms';
-import { currentChurchWeekday, roomMeetsOnWeekday } from '@/lib/ccb';
+import { currentChurchWeekday, roomMeetsOnWeekday, discoverChildrensMinistryRooms } from '@/lib/ccb';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,8 +31,16 @@ export default async function HomePage({
   const eligible = showAll
     ? allRooms.map(() => true)
     : await Promise.all(allRooms.map((room) => roomMeetsOnWeekday(room.id.split(','), weekday)));
-  const rooms = allRooms.filter((_, i) => eligible[i]);
-  const someHidden = !showAll && rooms.length < allRooms.length;
+  const configuredRooms = allRooms.filter((_, i) => eligible[i]);
+  const someHidden = !showAll && configuredRooms.length < allRooms.length;
+
+  // Any other Children's Ministry event CCB knows about, not already in
+  // rooms.json, so a newly created recurring class/program shows up without
+  // a manual edit here. rooms.json's own rooms always keep their friendly
+  // name and order; discovered ones are appended using CCB's own event name.
+  const knownIds = new Set(allRooms.flatMap((r) => r.id.split(',')));
+  const discovered = await discoverChildrensMinistryRooms(showAll ? null : weekday, knownIds);
+  const rooms = [...configuredRooms, ...discovered];
 
   return (
     <main className="picker">

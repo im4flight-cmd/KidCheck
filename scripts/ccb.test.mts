@@ -19,6 +19,7 @@ import {
   roomMeetsOnWeekday,
   currentChurchWeekday,
   diagnoseEventProfiles,
+  discoverChildrensMinistryRooms,
 } from '../lib/ccb.ts';
 import { toE164 } from '../lib/phone.ts';
 
@@ -275,6 +276,18 @@ test('diagnoseEventProfiles reports not configured without CCB creds', async () 
   delete process.env.CCB_API_PASS;
   const r = await diagnoseEventProfiles({});
   assert.deepEqual(r, { configured: false });
+});
+
+// Unlike roomMeetsOnWeekday (which fails OPEN, showing a room it can't
+// verify, since an admin already vouched for it in rooms.json), discovery
+// fails CLOSED: nothing is added when CCB cannot be reached at all, since an
+// unverified discovered event is itself a bad outcome, not a safe default.
+test('discoverChildrensMinistryRooms finds nothing when CCB is not configured', async () => {
+  delete process.env.CCB_SUBDOMAIN;
+  delete process.env.CCB_API_USER;
+  delete process.env.CCB_API_PASS;
+  const found = await discoverChildrensMinistryRooms(5, new Set(['158']));
+  assert.deepEqual(found, []);
 });
 
 test('toE164 normalizes US numbers and passes international through', () => {

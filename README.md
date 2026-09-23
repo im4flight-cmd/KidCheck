@@ -135,6 +135,14 @@ a permission hiccup) a room shows anyway, rather than risk hiding one someone
 needs. `/?all=1` always shows every configured room regardless, as a
 manual override.
 
+The picker also auto-discovers any other ChMS event sharing the same
+Children's Ministry grouping as the rooms above, so a newly created
+recurring class or program shows up on the day it meets without editing
+`rooms.json` at all. It uses that event's own ChMS name (rooms already in
+`rooms.json` keep their friendly name and always come first). Unlike the
+fail-open behavior above, a discovered event is only ever added when its own
+schedule can be confirmed, never guessed at.
+
 ### Combining several classes into one display
 
 To show more than one ChMS event on a single screen (for example, the 3, 4, and
