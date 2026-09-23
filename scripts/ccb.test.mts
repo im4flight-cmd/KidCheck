@@ -21,7 +21,8 @@ import {
   diagnoseEventProfiles,
   discoverChildrensMinistryRooms,
   evaluateDiscoveredEvent,
-  isWeeklyRecurring,
+  recurrenceKind,
+  recurrenceUntilDate,
 } from '../lib/ccb.ts';
 import { toE164 } from '../lib/phone.ts';
 
@@ -292,11 +293,89 @@ test('discoverChildrensMinistryRooms finds nothing when CCB is not configured', 
   assert.deepEqual(found, []);
 });
 
-test('isWeeklyRecurring only matches CCB\'s own "every week" wording', () => {
-  assert.equal(isWeeklyRecurring('Every week on Friday from 8:30am to 11:00am'), true);
-  assert.equal(isWeeklyRecurring('Every week on Sunday from 10:00am to 12:00pm'), true);
-  assert.equal(isWeeklyRecurring(''), false);
-  assert.equal(isWeeklyRecurring('One time event on April 26, 2026 from 12:00pm to 1:00pm'), false);
+test('recurrenceKind classifies CCB\'s own confirmed wordings', () => {
+  assert.equal(recurrenceKind('Every week on Friday from 8:30am to 11:00am'), 'weekly');
+  assert.equal(recurrenceKind('Every week on Sunday from 10:00am to 12:00pm'), 'weekly');
+  assert.equal(recurrenceKind('Every day until Mar 10, 2026 from 6:00pm to 8:00pm'), 'daily');
+  assert.equal(recurrenceKind(''), 'none');
+  assert.equal(recurrenceKind('One time event on April 26, 2026 from 12:00pm to 1:00pm'), 'none');
+});
+
+test('recurrenceUntilDate reads the "until <date>" clause, and is absent without one', () => {
+  assert.equal(recurrenceUntilDate('Every day until Mar 10, 2026 from 6:00pm to 8:00pm'), '2026-03-10');
+  assert.equal(recurrenceUntilDate('Every week on Friday from 8:30am to 11:00am'), undefined);
+  assert.equal(recurrenceUntilDate(''), undefined);
+});
+
+// Reproduces the live bug found 2026-09-23: CCB's start_date is a
+// VARIABLE-length human string ("Mar 8, 2026", "Apr 26, 2026"), not a fixed
+// 10-character ISO date. Slicing it to 10 characters truncated it into
+// garbage ("Mar 8, 202"), which failed validation and reported "no usable
+// start_date" for every single discovered event. start_datetime
+// ("2026-03-08 18:30:00") is fixed-width and used first; start_date is only
+// a parsed-in-full fallback.
+test('a human-readable start_date ("Mar 8, 2026" style) is parsed correctly, not truncated', () => {
+  const noDatetimeAtAll = evaluateDiscoveredEvent(
+    {
+      '@_id': '132',
+      name: 'Lunch with the Pastors',
+      start_date: 'Apr 26, 2026', // CCB's real format -- 12 characters, not 10
+      recurrence_description: 'One time event on April 26, 2026 from 12:00pm to 1:00pm',
+      event_grouping: { '#text': "Children's Ministry", '@_id': '6' },
+    },
+    '2026-04-26',
+    new Set(),
+    '6',
+  );
+  assert.equal(noDatetimeAtAll.startDate, '2026-04-26');
+  assert.equal(noDatetimeAtAll.eligible, true);
+
+  // start_datetime, when present, is preferred over parsing start_date.
+  const withDatetime = evaluateDiscoveredEvent(
+    {
+      '@_id': '132',
+      name: 'Lunch with the Pastors',
+      start_datetime: '2026-04-26 12:00:00',
+      start_date: 'Apr 26, 2026',
+      recurrence_description: 'One time event on April 26, 2026 from 12:00pm to 1:00pm',
+      event_grouping: { '#text': "Children's Ministry", '@_id': '6' },
+    },
+    '2026-09-23',
+    new Set(),
+    '6',
+  );
+  assert.equal(withDatetime.startDate, '2026-04-26');
+  assert.equal(withDatetime.eligible, false); // correctly excluded five months later
+  assert.doesNotMatch(withDatetime.reason, /no usable start_date/);
+});
+
+// Event 90 "Prophetic Ministry Night", confirmed live: "Every day until Mar
+// 10, 2026 ..." -- a DAILY recurrence (any weekday) with an explicit end
+// bound. It must show within its range, and never again once that range has
+// passed, however long ago.
+test('a daily recurring event with an "until" date stops being eligible after it', () => {
+  const propheticMinistryNight = {
+    '@_id': '90',
+    name: 'Prophetic Ministry Night',
+    start_date: 'Feb 10, 2026',
+    recurrence_description: 'Every day until Mar 10, 2026 from 6:00pm to 8:00pm',
+    event_grouping: { '#text': "Children's Ministry", '@_id': '6' },
+  };
+
+  // Within range, on a weekday that is not its start weekday -- daily means
+  // any day counts, unlike weekly.
+  const withinRange = evaluateDiscoveredEvent(propheticMinistryNight, '2026-03-04', new Set(), '6');
+  assert.equal(withinRange.eligible, true);
+
+  // Wayne's actual test date, many months after the series ended.
+  const longAfterItEnded = evaluateDiscoveredEvent(propheticMinistryNight, '2026-09-25', new Set(), '6');
+  assert.equal(longAfterItEnded.eligible, false);
+  assert.match(longAfterItEnded.reason, /ended 2026-03-10/);
+
+  // Before it even started.
+  const beforeItStarted = evaluateDiscoveredEvent(propheticMinistryNight, '2026-01-01', new Set(), '6');
+  assert.equal(beforeItStarted.eligible, false);
+  assert.match(beforeItStarted.reason, /has not started yet/);
 });
 
 // Reproduces the live bug found 2026-09-23: "Lunch with the Pastors" (events

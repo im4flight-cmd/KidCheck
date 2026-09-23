@@ -203,48 +203,63 @@ hiding a known-good room. `targetDate: null` skips the day check entirely
 (used for `/?all=1`). `app/page.tsx` appends discovered rooms after
 rooms.json's own (which keep their friendly names and order).
 
-## Fixed: a one-time event wrongly recurring every week (found + fixed 2026-09-23)
-Wayne reported live: on Wed 2026-09-23 the picker showed exactly one room,
-"Lunch with the Pastors" (events 132/138), a ONE-TIME Children's Ministry
-event on Sun 2026-04-26. Nothing else showed (correct: none of the 6
-rooms.json rooms meet on a Wednesday), but this one-off event five months
-in the past should never have appeared at all.
+## Fixed: two discovery bugs found live, one after the other (2026-09-23)
+Both found by Wayne actually testing `?debug=2` against real CCB data, not
+by inspection. Neither touched `roomMeetsOnWeekday`/`occurrencesForToday`
+(rooms.json's own 6 rooms) -- those were never reported broken.
 
-**Root cause**: the first `discoverChildrensMinistryRooms` swept every
-date-shaped string out of the event's raw XML (`fetchEventProfileDates`,
-built for classroom check-in events, where every date in the document really
-is a meeting occurrence) and checked if ANY matched today's weekday. A
-general CCB event carries other dates too (`created`, `modified`, etc.) that
-have nothing to do with when it meets -- one of "Lunch with the Pastors"'s
-happened to fall on a Wednesday, so it matched every Wednesday forever.
+**Bug 1 -- a one-time event wrongly recurring every week.** On Wed
+2026-09-23 the picker showed exactly one room, "Lunch with the Pastors"
+(events 132/138), a ONE-TIME Children's Ministry event on Sun 2026-04-26.
+Root cause: the first `discoverChildrensMinistryRooms` swept every
+date-shaped string out of the event's raw XML (built for classroom check-in
+events, where every date in the document really is a meeting occurrence).
+A general CCB event carries other dates too (`created`, `modified`, etc.)
+that have nothing to do with when it meets -- one of "Lunch with the
+Pastors"'s happened to land on a Wednesday, so it matched every Wednesday
+forever.
 
-**Fix**: `evaluateDiscoveredEvent(event, targetDate, excludeIds, groupingId)`
-uses the event's own structured fields directly instead -- `start_date` and
-`recurrence_description` (from the SAME `event_profiles` listing already
-fetched, no extra API call). `isWeeklyRecurring(text)` only trusts CCB's own
-confirmed wording ("Every week on ..."); anything else (blank, a one-time
-description) is treated as NOT recurring, the safer default. A one-time
-event only ever matches `targetDate === startDate` exactly; a weekly
-recurring one matches by weekday, but only from its own `start_date` onward.
-This does NOT touch `roomMeetsOnWeekday`/`occurrencesForToday` (rooms.json's
-own 6 rooms) -- those were not reported broken and are out of scope here.
+**Bug 2 -- `start_date` truncated to garbage.** The bug 1 fix introduced a
+new one: CCB's `start_date` is NOT a fixed 10-character ISO date, it is a
+VARIABLE-length human string ("Mar 8, 2026", "Apr 26, 2026" -- different
+lengths). Slicing it to 10 characters (what the bug 1 fix originally did)
+truncated it into garbage ("Mar 8, 202"), which then failed validation and
+reported "no usable start_date" for literally every discovered event.
+`resolveStartDate` now prefers `start_datetime` ("2026-03-08 18:30:00",
+fixed-width, first 10 characters), falling back to `parseHumanDate`
+(a small `new Date(...)`-based parser) on `start_date`'s free text only
+when `start_datetime` is unusable.
 
-Also added: `GET /api/discover?debug=2[&date=YYYY-MM-DD]`
-(`diagnoseDiscoveryEligibility`), a TEMPORARY view of every grouping-6
-event's start_date/start_datetime/recurrence_description and its exact
-eligibility decision + reason, so a wrong inclusion or exclusion is visible
-directly. The empty-state heading is now the exact wording Wayne asked for,
-"No classrooms scheduled today", with the "Show all classrooms" link always
-available there.
+Also surfaced while fixing bug 2: event 90 "Prophetic Ministry Night" uses
+"Every day until Mar 10, 2026 ...", a DAILY recurrence (any weekday) with an
+explicit end bound, not weekly. `recurrenceKind(text)` now returns
+`'none' | 'daily' | 'weekly'` (only trusting CCB's own confirmed wording;
+anything ambiguous is `'none'`, the safer default), and
+`recurrenceUntilDate(text)` reads an optional "until <date>" bound so a
+recurring series that already ended is never eligible again, however long
+ago. `evaluateDiscoveredEvent`: one-time matches only its own exact date;
+daily matches any weekday within its start/until bounds; weekly matches its
+own weekday, from its start date onward and up to its until date if any.
 
-Regression tests added using 132/138-style fake data (a Sun 2026-04-26
-one-time event checked against a Wed and a later Sun) and 158-style data
-(a Friday recurring event checked against a later Friday, a Wednesday, and
-a not-yet-started date). 31 tests pass total.
+`GET /api/discover?debug=2[&date=YYYY-MM-DD]` (`diagnoseDiscoveryEligibility`)
+remains: every grouping-6 event's start_date/start_datetime/
+recurrence_description and its exact decision + reason. The empty-state
+heading is "No classrooms scheduled today" with the "Show all classrooms"
+link always available there.
 
-**Not yet verified by Wayne**: reload the picker (any day) and confirm no
-unexpected room shows; on a day nothing qualifies, confirm "No classrooms
-scheduled today" plus the Show all link appears instead.
+Regression tests cover both bugs directly: a human-readable ("Mar 8, 2026"
+style) `start_date` parses correctly and is not truncated (bug 2, with and
+without `start_datetime` present); a daily-until-date event (90-style) is
+eligible within range and excluded long after its until date and before its
+start; plus the original 132/138 one-time and 158 weekly regression tests.
+34 tests pass total.
+
+**Confirmed 2026-09-23 by Wayne**: picker correctly shows "No classrooms
+scheduled today" on a day nothing meets.
+**Not yet verified by Wayne**: `?debug=2&date=2026-09-25` should now show a
+real `start_date` (not "no usable start_date") for every event, "Lunch with
+the Pastors"-style events ineligible with a clear one-time/ended reason, and
+158 excluded (already tracked in rooms.json).
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at

@@ -547,15 +547,53 @@ export function currentChurchDate(): string {
   return todayInChurchTz();
 }
 
+// CCB's start_date is NOT a fixed-width ISO date -- it is a human-readable,
+// VARIABLE-length string like "Mar 8, 2026" ("Apr 26, 2026" is a different
+// length). Slicing it to 10 characters (an earlier bug, found live
+// 2026-09-23) silently truncates it into garbage ("Mar 8, 202"), which then
+// fails validation and reports "no usable start_date" for every event.
+// start_datetime ("2026-03-08 18:30:00") IS fixed-width, so its first 10
+// characters are used when available; parsing start_date's free text is
+// only a fallback.
+function parseHumanDate(text: string): string {
+  const cleaned = text.trim().replace(/^([A-Za-z]+)\./, '$1'); // "Mar." -> "Mar"
+  const d = new Date(cleaned);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+function resolveStartDate(e: any): string {
+  const fromDatetime = nodeText(e?.start_datetime).slice(0, 10);
+  if (isValidOccurrence(fromDatetime)) return fromDatetime;
+  return parseHumanDate(nodeText(e?.start_date));
+}
+
 // CCB's own wording so far (confirmed live): "Every week on <Weekday> from
-// ... to ...". Deliberately narrow (must clearly say "week"), so anything
+// ... to ..." (weekly, a specific weekday) and "Every day until <date> ..."
+// (daily, any weekday, but bounded). Deliberately narrow, so anything
 // ambiguous or one-time is treated as NOT recurring -- the safer default,
 // since a one-time event wrongly treated as recurring would keep
-// reappearing indefinitely on its weekday, while a recurring event wrongly
-// treated as one-time merely needs a clearer recurrence_description to be
-// caught, a far smaller failure.
-export function isWeeklyRecurring(recurrenceDescription: string): boolean {
-  return /\bweek\b/i.test(recurrenceDescription);
+// reappearing indefinitely, while a recurring event wrongly treated as
+// one-time merely needs a clearer recurrence_description to be caught, a far
+// smaller failure.
+export type RecurrenceKind = 'none' | 'daily' | 'weekly';
+
+export function recurrenceKind(recurrenceDescription: string): RecurrenceKind {
+  if (/\bevery\s+day\b/i.test(recurrenceDescription)) return 'daily';
+  if (/\bweek\b/i.test(recurrenceDescription)) return 'weekly';
+  return 'none';
+}
+
+// Pulls a bare end-bound date out of a recurrence_description's own "until
+// <date>" clause (e.g. "Every day until Mar 10, 2026 ..."), so a recurring
+// series that has already ended is not treated as open-ended forever.
+// undefined when there is no "until" clause at all (an open-ended series,
+// e.g. Bible Study Kids' "Every week on Friday from 8:30am to 11:00am").
+export function recurrenceUntilDate(recurrenceDescription: string): string | undefined {
+  const m = recurrenceDescription.match(/\buntil\s+([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})/i);
+  if (!m) return undefined;
+  return parseHumanDate(m[1]) || undefined;
 }
 
 export type DiscoveryDecision = {
@@ -572,14 +610,17 @@ export type DiscoveryDecision = {
 /**
  * Whether one event_profiles (plural) entry belongs on the picker for
  * `targetDate` (bare YYYY-MM-DD, church timezone). Uses the event's own
- * structured `start_date` and `recurrence_description` fields directly,
- * rather than a generic date sweep of the whole raw XML (that swept up
- * unrelated dates like `created`/`modified` on a general event, and was the
- * root cause of a one-time past event -- "Lunch with the Pastors", a single
- * 2026-04-26 meeting -- wrongly matching every week on its weekday months
- * later; found live 2026-09-23). A one-time event only ever matches its own
- * exact start date; only an event whose own description says it repeats
- * weekly is checked by weekday, and only from its own start date onward.
+ * structured `start_date`/`start_datetime` and `recurrence_description`
+ * fields directly, rather than a generic date sweep of the whole raw XML
+ * (that swept up unrelated dates like `created`/`modified` on a general
+ * event, and was the root cause of a one-time past event -- "Lunch with the
+ * Pastors", a single 2026-04-26 meeting -- wrongly matching every week on
+ * its weekday months later; found live 2026-09-23).
+ *
+ * A one-time event only ever matches its own exact start date. A "daily"
+ * event (e.g. "Every day until <date>") matches any weekday within its
+ * start/until bounds. A "weekly" event matches only its own weekday, from
+ * its start date onward, and up to its "until" date if it has one.
  */
 export function evaluateDiscoveredEvent(
   e: any,
@@ -589,7 +630,7 @@ export function evaluateDiscoveredEvent(
 ): DiscoveryDecision {
   const id = String(e?.['@_id'] ?? e?.id ?? '');
   const name = nodeText(e?.name) || `Event ${id}`;
-  const startDate = nodeText(e?.start_date).slice(0, 10);
+  const startDate = resolveStartDate(e);
   const recurrenceDescription = nodeText(e?.recurrence_description);
   const gid = String(e?.event_grouping?.['@_id'] ?? '');
   const base = { id, name, startDate, recurrenceDescription, groupingId: gid };
@@ -605,7 +646,9 @@ export function evaluateDiscoveredEvent(
     return { ...base, excluded, eligible: false, reason: 'no usable start_date on record' };
   }
 
-  if (!isWeeklyRecurring(recurrenceDescription)) {
+  const kind = recurrenceKind(recurrenceDescription);
+
+  if (kind === 'none') {
     const eligible = startDate === targetDate;
     return {
       ...base,
@@ -617,12 +660,19 @@ export function evaluateDiscoveredEvent(
     };
   }
 
-  const startWeekday = weekdayOf(startDate);
-  const targetWeekday = weekdayOf(targetDate);
   if (targetDate < startDate) {
-    return { ...base, excluded, eligible: false, reason: `weekly recurring but has not started yet (starts ${startDate})` };
+    return { ...base, excluded, eligible: false, reason: `${kind} recurring but has not started yet (starts ${startDate})` };
   }
-  const eligible = startWeekday === targetWeekday;
+  const until = recurrenceUntilDate(recurrenceDescription);
+  if (until && targetDate > until) {
+    return { ...base, excluded, eligible: false, reason: `${kind} recurring but ended ${until}` };
+  }
+
+  if (kind === 'daily') {
+    return { ...base, excluded, eligible: true, reason: `daily recurring, within range (started ${startDate}${until ? `, until ${until}` : ''})` };
+  }
+
+  const eligible = weekdayOf(startDate) === weekdayOf(targetDate);
   return {
     ...base,
     excluded,
