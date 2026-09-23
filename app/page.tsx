@@ -1,14 +1,46 @@
 import Link from 'next/link';
 import { getRooms } from '@/lib/rooms';
-import { currentChurchWeekday, currentChurchDate, roomMeetsOnWeekday, discoverChildrensMinistryRooms } from '@/lib/ccb';
+import {
+  currentChurchWeekday,
+  currentChurchDate,
+  roomMeetsOnWeekday,
+  discoverChildrensMinistryRooms,
+  discoverExtraRooms,
+} from '@/lib/ccb';
 
 export const dynamic = 'force-dynamic';
+
+// The 5 Sunday kids ministry classrooms, always shown on the ?all=1 page
+// regardless of the day, in this order, per Wayne's request. Everything
+// else configured in rooms.json (currently just Bible Study Kids) goes in
+// the "Weekday & Special Events" folder instead.
+const SUNDAY_ROOM_NAMES = new Set(['Nursery', '3-5 Year Olds', 'K-1st Grade', '2nd-4th Grade', '5th-6th Grade']);
 
 function Arrow() {
   return (
     <svg className="rc-arrow" width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+function TodayTag() {
+  return <span className="today-tag">Today</span>;
+}
+
+function RoomCard({ id, name, today }: { id: string; name: string; today?: boolean }) {
+  return (
+    <Link className="room-card" href={`/room/${encodeURIComponent(id)}`}>
+      <span>
+        <span className="rc-open">Open display</span>
+        <br />
+        <span className="rc-name">
+          {name}
+          {today && <TodayTag />}
+        </span>
+      </span>
+      <Arrow />
+    </Link>
   );
 }
 
@@ -21,26 +53,46 @@ export default async function HomePage({
   const showAll = all === '1';
   const allRooms = getRooms();
   const weekday = currentChurchWeekday();
-  // Only show rooms that actually meet today (Sundays show the age group
-  // rooms, Fridays show Bible Study Kids, etc), based on each room's own
-  // event_profile schedule. Falls open to showing a room when that can't be
-  // determined (CCB not configured yet, demo mode, a permission hiccup), so
-  // this can only ever hide a room CCB positively confirms doesn't meet
-  // today, never one it simply couldn't check. "Show all classrooms" always
-  // bypasses this, so a wrong guess never fully strands anyone.
-  const eligible = showAll
-    ? allRooms.map(() => true)
-    : await Promise.all(allRooms.map((room) => roomMeetsOnWeekday(room.id.split(','), weekday)));
-  const configuredRooms = allRooms.filter((_, i) => eligible[i]);
-  const someHidden = !showAll && configuredRooms.length < allRooms.length;
 
-  // Any other Children's Ministry event CCB knows about, not already in
-  // rooms.json, so a newly created recurring class/program shows up without
-  // a manual edit here. rooms.json's own rooms always keep their friendly
-  // name and order; discovered ones are appended using CCB's own event name.
+  // SECTION 1, "today's classrooms": unchanged from before, and identical
+  // whether this is the plain picker or ?all=1 -- Wayne asked to keep this
+  // exact behavior. Only shows rooms that actually meet today, based on each
+  // room's own event_profile schedule. Falls open to showing a room when
+  // that can't be determined (CCB not configured yet, demo mode, a
+  // permission hiccup), so this can only ever hide a room CCB positively
+  // confirms doesn't meet today, never one it simply couldn't check.
+  const eligible = await Promise.all(allRooms.map((room) => roomMeetsOnWeekday(room.id.split(','), weekday)));
+  const configuredRooms = allRooms.filter((_, i) => eligible[i]);
+  const someHidden = configuredRooms.length < allRooms.length;
+
   const knownIds = new Set(allRooms.flatMap((r) => r.id.split(',')));
-  const discovered = await discoverChildrensMinistryRooms(showAll ? null : currentChurchDate(), knownIds);
-  const rooms = [...configuredRooms, ...discovered];
+  const discoveredToday = await discoverChildrensMinistryRooms(currentChurchDate(), knownIds);
+  const todaysRooms = [...configuredRooms, ...discoveredToday];
+
+  // ?all=1 only: SECTION 2 (the 5 Sunday rooms, always, minus whichever are
+  // already in section 1 today) and SECTION 3 (everything else, in a
+  // collapsible folder).
+  let sundayRooms: { id: string; name: string }[] = [];
+  let folderRooms: { id: string; name: string; isToday: boolean }[] = [];
+  let folderHasToday = false;
+  if (showAll) {
+    const todaysIds = new Set(todaysRooms.map((r) => r.id));
+    sundayRooms = allRooms.filter((r) => SUNDAY_ROOM_NAMES.has(r.name) && !todaysIds.has(r.id));
+
+    const otherConfigured = allRooms.filter((r) => !SUNDAY_ROOM_NAMES.has(r.name));
+    const otherConfiguredWithToday = await Promise.all(
+      otherConfigured.map(async (r) => ({
+        id: r.id,
+        name: r.name,
+        isToday: await roomMeetsOnWeekday(r.id.split(','), weekday),
+      })),
+    );
+    const extraDiscovered = await discoverExtraRooms(knownIds);
+    folderRooms = [...otherConfiguredWithToday, ...extraDiscovered].sort(
+      (a, b) => Number(b.isToday) - Number(a.isToday),
+    );
+    folderHasToday = folderRooms.some((r) => r.isToday);
+  }
 
   return (
     <main className="picker">
@@ -49,17 +101,10 @@ export default async function HomePage({
       <h1>Classroom Check-In</h1>
       <p className="subtitle">Pick a classroom to open its live check-in display.</p>
 
-      {rooms.length > 0 ? (
+      {todaysRooms.length > 0 ? (
         <div className="room-grid">
-          {rooms.map((room) => (
-            <Link key={room.id} className="room-card" href={`/room/${encodeURIComponent(room.id)}`}>
-              <span>
-                <span className="rc-open">Open display</span>
-                <br />
-                <span className="rc-name">{room.name}</span>
-              </span>
-              <Arrow />
-            </Link>
+          {todaysRooms.map((room) => (
+            <RoomCard key={room.id} id={room.id} name={room.name} />
           ))}
         </div>
       ) : allRooms.length > 0 ? (
@@ -83,10 +128,32 @@ export default async function HomePage({
         </div>
       )}
 
-      {(someHidden || (rooms.length === 0 && allRooms.length > 0)) && (
+      {!showAll && (someHidden || (todaysRooms.length === 0 && allRooms.length > 0)) && (
         <p className="show-all">
           <Link href="/?all=1">Show all classrooms</Link>
         </p>
+      )}
+
+      {showAll && sundayRooms.length > 0 && (
+        <section className="picker-section">
+          <h2 className="section-heading">Sunday Service Classrooms</h2>
+          <div className="room-grid">
+            {sundayRooms.map((room) => (
+              <RoomCard key={room.id} id={room.id} name={room.name} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {showAll && folderRooms.length > 0 && (
+        <details className="picker-folder" open={folderHasToday}>
+          <summary>Weekday &amp; Special Events</summary>
+          <div className="room-grid">
+            {folderRooms.map((room) => (
+              <RoomCard key={room.id} id={room.id} name={room.name} today={room.isToday} />
+            ))}
+          </div>
+        </details>
       )}
     </main>
   );

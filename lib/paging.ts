@@ -25,6 +25,82 @@ const CLEARSTREAM_URL = 'https://api.getclearstream.com/v1/messages';
 const RESEND_BLOCK_MS = 60000;
 const lastSent = new Map<string, number>();
 
+// Temporary delivery-confirmation investigation (2026-09-23): a real send's
+// raw response, and one immediate read-only status lookup using whatever id
+// it contains, kept in memory so a debug GET can show them. Nothing here
+// ever sends a new text; this only records/reads what a real "Text parent"
+// tap already did. Vercel is serverless, so this can be empty if the debug
+// request lands on a different warm instance than the one that just sent --
+// trigger a real send, then open the debug URL right away.
+export type SendDebugRecord = {
+  at: string;
+  sendStatus: number;
+  sendRawBody: string;
+  extractedId?: string;
+  statusLookupUrl?: string;
+  statusLookupStatus?: number;
+  statusLookupRawBody?: string;
+  statusLookupError?: string;
+};
+const RECENT_SENDS_MAX = 10;
+const recentSends: SendDebugRecord[] = [];
+
+function recordSend(rec: SendDebugRecord) {
+  recentSends.unshift(rec);
+  if (recentSends.length > RECENT_SENDS_MAX) recentSends.length = RECENT_SENDS_MAX;
+}
+
+export function recentSendDebugLog(): SendDebugRecord[] {
+  return recentSends;
+}
+
+// Clearstream's send response shape for a successful send is not yet
+// confirmed, so this tries several plausible id-ish keys rather than
+// asserting one; the full raw body is always kept regardless, so nothing is
+// lost if none of these guesses match.
+function extractMessageId(rawBody: string): string | undefined {
+  try {
+    const json = JSON.parse(rawBody);
+    const candidates = [
+      json?.id,
+      json?.message_id,
+      json?.messageId,
+      json?.uuid,
+      json?.data?.id,
+      json?.message?.id,
+      json?.data?.message_id,
+    ];
+    const found = candidates.find((v) => v !== undefined && v !== null && v !== '');
+    return found !== undefined ? String(found) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Unconfirmed hypothesis, evidence-first: a REST-conventional detail lookup
+// for a resource created at POST .../v1/messages would be
+// GET .../v1/messages/<id>. A read-only GET; Clearstream's own response
+// (real data, or an error naming what's wrong) says whether this guess is
+// right, the same way individual_id and subscribers[] were confirmed for
+// CCB and Clearstream earlier in this project.
+async function lookupClearstreamStatus(
+  id: string,
+): Promise<{ url: string; status: number; rawBody?: string; error?: string }> {
+  const key = String(process.env.CLEARSTREAM_API_KEY ?? '');
+  const url = `${CLEARSTREAM_URL}/${encodeURIComponent(id)}`;
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-Api-Key': key, Accept: 'application/json' },
+      signal: AbortSignal.timeout(10000),
+    });
+    const rawBody = await res.text();
+    return { url, status: res.status, rawBody: rawBody.slice(0, 4000) };
+  } catch (err) {
+    return { url, status: 0, error: String((err as Error)?.message ?? err) };
+  }
+}
+
 export function pagingEnabled(): boolean {
   return process.env.PAGING_ENABLED === 'true';
 }
@@ -98,9 +174,29 @@ export async function sendPage(childId: string, room: string): Promise<PageResul
     // Surface Clearstream's own reason (it is not sensitive, no phone number
     // or key in it) so the exact fix is visible without a server log.
     const why = sent.detail ? `: ${sent.detail}` : '';
+    recordSend({ at: new Date().toISOString(), sendStatus: sent.status, sendRawBody: sent.rawBody ?? sent.detail ?? '' });
     return { error: `The text service did not accept the message (${sent.status || 'no response'})${why}` };
   }
   lastSent.set(childId, now);
+
+  // Temporary delivery-confirmation investigation: capture the real send's
+  // raw response, and -- read-only, no new text -- one immediate status
+  // lookup if a plausible message id was found in it. See recentSendDebugLog.
+  const record: SendDebugRecord = {
+    at: new Date().toISOString(),
+    sendStatus: sent.status,
+    sendRawBody: sent.rawBody ?? '',
+    extractedId: extractMessageId(sent.rawBody ?? ''),
+  };
+  if (record.extractedId) {
+    const looked = await lookupClearstreamStatus(record.extractedId);
+    record.statusLookupUrl = looked.url;
+    record.statusLookupStatus = looked.status;
+    record.statusLookupRawBody = looked.rawBody;
+    record.statusLookupError = looked.error;
+  }
+  recordSend(record);
+
   return { ok: true, dryRun: false, guardian, toMasked: maskPhone(phone) };
 }
 
@@ -108,7 +204,7 @@ async function sendClearstream(
   to: string,
   header: string,
   body: string,
-): Promise<{ ok: boolean; status: number; detail?: string }> {
+): Promise<{ ok: boolean; status: number; detail?: string; rawBody?: string }> {
   const key = String(process.env.CLEARSTREAM_API_KEY ?? '');
   const form = new URLSearchParams();
   form.set('message_header', header);
@@ -135,6 +231,6 @@ async function sendClearstream(
   }
 
   const text = await res.text();
-  if (res.status >= 200 && res.status < 300) return { ok: true, status: res.status };
-  return { ok: false, status: res.status, detail: text.slice(0, 300) };
+  if (res.status >= 200 && res.status < 300) return { ok: true, status: res.status, rawBody: text.slice(0, 4000) };
+  return { ok: false, status: res.status, detail: text.slice(0, 300), rawBody: text.slice(0, 4000) };
 }

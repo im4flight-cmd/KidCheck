@@ -46,8 +46,10 @@ several ChMS events. Current:
 Room URL param is the ids comma-joined (e.g. `118,112,119`); the browser
 %2C-encodes the comma and the route decodes it. Edit rooms here, not in Vercel.
 The room PICKER (`/`) only shows a room if its event has a meeting scheduled
-on today's weekday (see `roomMeetsOnWeekday` below) — `/?all=1` always shows
-every configured room regardless, as a manual override.
+on today's weekday (see `roomMeetsOnWeekday` below); unchanged since it was
+first built, per Wayne's explicit 2026-09-23 instruction to leave the main
+page exactly as-is. `/?all=1` is a SEPARATE, richer page (see below), not a
+"same page, bypass the filter" toggle anymore.
 
 ## How it works (key files)
 - `lib/ccb.ts` — CCB client. `attendance_profile` per event id (merged for
@@ -71,11 +73,13 @@ every configured room regardless, as a manual override.
   shown) when event_profile can't be read for ANY of the room's ids — hiding
   a room a teacher needs is worse than showing one extra. `currentChurchWeekday()`
   gives today's weekday (0=Sun) in America/Chicago, not the server's UTC day.
-  Deliberately NOT implemented: auto-discovering a Children's Ministry event
-  not yet in rooms.json. No CCB "list/search events" service has been
-  confirmed to exist in this project; guessing at one risks the same kind of
-  wrong-field-name churn the Clearstream integration went through. Adding a
-  newly created recurring class/program stays a manual `rooms.json` edit.
+  `discoverChildrensMinistryRooms(targetDate, excludeIds)` — the main
+  picker's Children's Ministry (grouping id 6) discovery, unchanged, see the
+  2026-09-23 sections below — and `discoverExtraRooms(excludeIds)` — the
+  richer `?all=1`-only discovery covering every grouping, see the layout
+  section below — both build on `evaluateDateEligibility` (grouping-agnostic
+  start_date/recurrence_description logic) and `fetchAllEventProfiles`
+  (cached 5 min list of all events).
 - `lib/rooms.ts` — room config (ids arrays). `lib/paging.ts` — Clearstream send
   (`api.getclearstream.com/v1/messages`, X-Api-Key, form fields
   `message_header`, `message_body`, `subscribers[]` — plural array, NOT
@@ -141,12 +145,14 @@ every configured room regardless, as a manual override.
   directly rather than needing another guess.
 
 ## TODO / temporary
-- The four `debug=`/`debugGuardian=` diagnostics in `app/api/roster/route.ts`
-  are TEMPORARY. Remove them once Sunday's live check-in and a real page send
-  are both confirmed working.
-- Texting: last confirmed state is the `subscribers[]` fix (commit 39ce1d7),
-  but Wayne has not yet confirmed a real text actually arrived on a phone.
-  Pick this back up once he reports the result of trying "Text parent" again.
+- The four `debug=`/`debugGuardian=` diagnostics in `app/api/roster/route.ts`,
+  `/api/discover?debug=1` and `?debug=2`, and `/api/page?debug=1` are all
+  TEMPORARY. None removed yet — still actively useful for the in-progress
+  delivery-confirmation work below.
+- **Confirmed 2026-09-23 by Wayne, live, end to end**: checked his son into a
+  real test event (160), `/room/160` showed him live, and "Text parent"
+  actually sent ("Text sent to Wayne A."). Texting works. What's now open is
+  delivery CONFIRMATION (below), a separate, additive feature.
 
 ## Resolved: Women's Bible Study childcare (2026-09-22 → 2026-09-23)
 Wayne found it himself in ChMS's browser UI (I have no CCB access to have
@@ -256,10 +262,102 @@ start; plus the original 132/138 one-time and 158 weekly regression tests.
 
 **Confirmed 2026-09-23 by Wayne**: picker correctly shows "No classrooms
 scheduled today" on a day nothing meets.
-**Not yet verified by Wayne**: `?debug=2&date=2026-09-25` should now show a
-real `start_date` (not "no usable start_date") for every event, "Lunch with
-the Pastors"-style events ineligible with a clear one-time/ended reason, and
-158 excluded (already tracked in rooms.json).
+**Confirmed 2026-09-23 by Wayne**: `?debug=2&date=2026-09-25` now shows real
+`start_date` values throughout.
+
+## Resolved: main page layout split, ?all=1 redesigned, live header bug (2026-09-23)
+Change of plan mid-build: Wayne's first ask was to put the pinned-Sunday +
+folder layout directly on `/`. He then asked to revert `/` to exactly how it
+already worked, and put the new layout on `/?all=1` instead. Current state:
+
+- **`/` (main page): UNCHANGED**, byte-for-byte the same logic as before this
+  whole layout conversation (today-eligible rooms.json entries + today-
+  eligible Children's Ministry discovery via `discoverChildrensMinistryRooms`,
+  "No classrooms scheduled today" when none qualify). Never touch this
+  without Wayne asking again specifically.
+- **`/?all=1` (separate page, not a "same page, unfiltered" toggle)**: three
+  sections. (1) "today's classrooms" -- identical computation to `/`. (2)
+  "Sunday Service Classrooms" -- the 5 pinned rooms (`SUNDAY_ROOM_NAMES` in
+  `app/page.tsx`), always, in rooms.json's order, MINUS whichever are
+  already in section 1 (so Sundays don't show the same 5 twice). (3) a
+  `<details>` "Weekday & Special Events" folder (native HTML, no client JS)
+  containing `lib/ccb.ts`'s new `discoverExtraRooms(excludeIds)`: every OTHER
+  rooms.json room (currently just Bible Study Kids, `isToday` via
+  `roomMeetsOnWeekday`) plus every Children's Ministry event (persistent --
+  recurring ones always listed, tagged `isToday` only when it applies; a
+  ONE-TIME CM event only listed on its own day, so "Lunch with the Pastors"
+  does not clutter forever) plus any OTHER-grouping event that is BOTH
+  scheduled today (by `evaluateDateEligibility`, grouping-agnostic) AND has a
+  real check-in recorded today (`eventHasCheckInsToday`, reuses
+  `occurrencesForToday`/`fetchRoster`) -- this is what surfaces an ad hoc
+  test/special event like Wayne's 159/160 (grouping "Regular Events", not
+  Children's Ministry). Sorted `isToday`-first; the folder auto-expands
+  (`open={folderHasToday}`) only when something inside applies today.
+
+- **Fixed: live header showed "Classroom" instead of the real event name**
+  (e.g. `/room/160`), while a PAST-date view of the same event correctly
+  showed its real name. Root cause: `getSingleRoster`'s occurrence-guessing
+  (`occurrencesForToday`) can return MULTIPLE candidate occurrence times for
+  ONE event id (a one-off/ad hoc event's `event_profile` sweep can match more
+  than one date-shaped string for "today"); when that happens the results
+  were combined with `mergeRosters`, which always blanks `room` -- correct
+  for `getRoster`'s OTHER use of the same function (genuinely different
+  event ids combined into one room), wrong here (same underlying event, just
+  multiple occurrence-guesses of it, so any successful guess's real `<name>`
+  is authoritative). Fixed by patching `.room` back in after merging, using
+  whichever guess actually returned one. This matters most for a discovered
+  room with no rooms.json entry to fall back on for its display name.
+
+**Not yet verified by Wayne**: reload `/` (unchanged, should look exactly as
+before) and `/?all=1` (new 3-section layout); open a discovered/ad hoc
+event's live display and confirm the header now shows its real name instead
+of "Classroom".
+
+## In progress: Clearstream delivery confirmation (started 2026-09-23)
+Wayne wants to know not just that Clearstream ACCEPTED a send (today's "Text
+sent" toast), but whether the parent's phone actually got it. Evidence-first,
+same as the CCB discovery work -- do not guess Clearstream's status-lookup
+field names or endpoint.
+
+**Step 1 (shipped, probe only, no UI yet)**: `lib/paging.ts` now captures the
+FULL raw Clearstream response on a real send (previously discarded on
+success), tries to pull a message id out of it (`extractMessageId` -- tries
+several plausible key names, does not assume one), and if found, immediately
+makes ONE read-only status-lookup GET to the unconfirmed hypothesis
+`https://api.getclearstream.com/v1/messages/<id>` (REST-conventional, same
+pattern as the send URL). Both raw responses are kept in memory (last 10
+sends, this warm instance only) via `recordSend`/`recentSendDebugLog`.
+`GET /api/page?debug=1` reports them. Nothing here ever sends a new text --
+it only reads what a real "Text parent" tap already did.
+**Caveat**: Vercel is serverless; this in-memory log can be empty if the
+debug request lands on a different instance than the one that just sent.
+Trigger a real send, then open the debug URL right away.
+
+**Still needed from Wayne**: trigger a real "Text parent" send, then
+immediately open `/api/page?debug=1` and paste back what it shows (the raw
+send response, whether an id was found, and the raw status-lookup response
+or error).
+
+**Step 2 (blocked on the above, do not build yet)**: once real field names
+are confirmed, build the actual UI, per Wayne's exact spec:
+- Right after tapping Send: a neutral toast/spinner, "Text sent to
+  <parent name>'s parent. Checking delivery..."
+- On Clearstream confirming delivery (poll status for up to ~60s): green
+  toast with a check mark, "Delivered. <parent name>'s parent received the
+  text.", visible ~8 seconds.
+- On Clearstream reporting failure: red toast, stays until dismissed,
+  "Not delivered. <plain reason, e.g. number opted out / invalid number>.
+  Please find the parent another way."
+- No status after ~60s: amber toast, "Sent, but delivery not confirmed yet.
+  You may want to follow up."
+- Also mark the child's card itself with a small "Parent texted" /
+  "Delivered" badge plus the time, visible to a volunteer glancing at the
+  screen, and it must SURVIVE the 20s roster refresh (so it needs to live in
+  RoomBoard's own state, keyed by child id, not just derived from the
+  roster response each poll).
+- Use the parent's name when available, fall back to the child's.
+- No new texts sent by any probe or test, ever, while building/verifying
+  this.
 
 ## Coordination
 User switches between separate Claude accounts to save tokens, never two at

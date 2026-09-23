@@ -607,43 +607,31 @@ export type DiscoveryDecision = {
   reason: string;
 };
 
+type DateEligibility = { startDate: string; recurrenceDescription: string; eligible: boolean; reason: string };
+
 /**
- * Whether one event_profiles (plural) entry belongs on the picker for
- * `targetDate` (bare YYYY-MM-DD, church timezone). Uses the event's own
- * structured `start_date`/`start_datetime` and `recurrence_description`
- * fields directly, rather than a generic date sweep of the whole raw XML
- * (that swept up unrelated dates like `created`/`modified` on a general
- * event, and was the root cause of a one-time past event -- "Lunch with the
- * Pastors", a single 2026-04-26 meeting -- wrongly matching every week on
- * its weekday months later; found live 2026-09-23).
+ * Whether one event_profiles (plural) entry occurs on `targetDate` (bare
+ * YYYY-MM-DD, church timezone), by its own structured `start_date`/
+ * `start_datetime` and `recurrence_description` fields, rather than a
+ * generic date sweep of the whole raw XML (that swept up unrelated dates
+ * like `created`/`modified` on a general event, and was the root cause of a
+ * one-time past event -- "Lunch with the Pastors", a single 2026-04-26
+ * meeting -- wrongly matching every week on its weekday months later; found
+ * live 2026-09-23). Grouping-agnostic: used both for the Children's Ministry
+ * picker (`evaluateDiscoveredEvent`) and for any-grouping folder discovery
+ * (`discoverExtraRooms`).
  *
  * A one-time event only ever matches its own exact start date. A "daily"
  * event (e.g. "Every day until <date>") matches any weekday within its
  * start/until bounds. A "weekly" event matches only its own weekday, from
  * its start date onward, and up to its "until" date if it has one.
  */
-export function evaluateDiscoveredEvent(
-  e: any,
-  targetDate: string,
-  excludeIds: Set<string>,
-  groupingId: string,
-): DiscoveryDecision {
-  const id = String(e?.['@_id'] ?? e?.id ?? '');
-  const name = nodeText(e?.name) || `Event ${id}`;
+function evaluateDateEligibility(e: any, targetDate: string): DateEligibility {
   const startDate = resolveStartDate(e);
   const recurrenceDescription = nodeText(e?.recurrence_description);
-  const gid = String(e?.event_grouping?.['@_id'] ?? '');
-  const base = { id, name, startDate, recurrenceDescription, groupingId: gid };
 
-  if (gid !== groupingId) {
-    return { ...base, excluded: false, eligible: false, reason: `not in grouping ${groupingId} (this is grouping ${gid || 'none'})` };
-  }
-  const excluded = excludeIds.has(id);
-  if (excluded) {
-    return { ...base, excluded, eligible: false, reason: 'already tracked in rooms.json' };
-  }
   if (!isValidOccurrence(startDate)) {
-    return { ...base, excluded, eligible: false, reason: 'no usable start_date on record' };
+    return { startDate, recurrenceDescription, eligible: false, reason: 'no usable start_date on record' };
   }
 
   const kind = recurrenceKind(recurrenceDescription);
@@ -651,8 +639,8 @@ export function evaluateDiscoveredEvent(
   if (kind === 'none') {
     const eligible = startDate === targetDate;
     return {
-      ...base,
-      excluded,
+      startDate,
+      recurrenceDescription,
       eligible,
       reason: eligible
         ? `one-time event, matches its own start date ${startDate}`
@@ -661,21 +649,21 @@ export function evaluateDiscoveredEvent(
   }
 
   if (targetDate < startDate) {
-    return { ...base, excluded, eligible: false, reason: `${kind} recurring but has not started yet (starts ${startDate})` };
+    return { startDate, recurrenceDescription, eligible: false, reason: `${kind} recurring but has not started yet (starts ${startDate})` };
   }
   const until = recurrenceUntilDate(recurrenceDescription);
   if (until && targetDate > until) {
-    return { ...base, excluded, eligible: false, reason: `${kind} recurring but ended ${until}` };
+    return { startDate, recurrenceDescription, eligible: false, reason: `${kind} recurring but ended ${until}` };
   }
 
   if (kind === 'daily') {
-    return { ...base, excluded, eligible: true, reason: `daily recurring, within range (started ${startDate}${until ? `, until ${until}` : ''})` };
+    return { startDate, recurrenceDescription, eligible: true, reason: `daily recurring, within range (started ${startDate}${until ? `, until ${until}` : ''})` };
   }
 
   const eligible = weekdayOf(startDate) === weekdayOf(targetDate);
   return {
-    ...base,
-    excluded,
+    startDate,
+    recurrenceDescription,
     eligible,
     reason: eligible
       ? `weekly recurring, weekday matches (started ${startDate})`
@@ -683,14 +671,49 @@ export function evaluateDiscoveredEvent(
   };
 }
 
+/** Same as `evaluateDateEligibility`, plus the Children's Ministry grouping
+ * and rooms.json-exclusion checks used by the main picker's discovery. */
+export function evaluateDiscoveredEvent(
+  e: any,
+  targetDate: string,
+  excludeIds: Set<string>,
+  groupingId: string,
+): DiscoveryDecision {
+  const id = String(e?.['@_id'] ?? e?.id ?? '');
+  const name = nodeText(e?.name) || `Event ${id}`;
+  const gid = String(e?.event_grouping?.['@_id'] ?? '');
+  const dateInfo = evaluateDateEligibility(e, targetDate);
+
+  if (gid !== groupingId) {
+    return {
+      id, name, groupingId: gid,
+      startDate: dateInfo.startDate,
+      recurrenceDescription: dateInfo.recurrenceDescription,
+      excluded: false,
+      eligible: false,
+      reason: `not in grouping ${groupingId} (this is grouping ${gid || 'none'})`,
+    };
+  }
+  const excluded = excludeIds.has(id);
+  if (excluded) {
+    return {
+      id, name, groupingId: gid,
+      startDate: dateInfo.startDate,
+      recurrenceDescription: dateInfo.recurrenceDescription,
+      excluded,
+      eligible: false,
+      reason: 'already tracked in rooms.json',
+    };
+  }
+  return { id, name, groupingId: gid, excluded, ...dateInfo };
+}
+
 /**
  * Any Children's Ministry event (event_grouping id 6) not already tracked in
  * `excludeIds` (rooms.json's own ids), so a newly created recurring
- * class/program shows up on the picker without a manual rooms.json edit.
- * `targetDate` null skips the day check entirely (used for the ?all=1
- * override); otherwise only events `evaluateDiscoveredEvent` finds eligible
- * for that exact date are included (see its doc comment for what changed
- * and why).
+ * class/program shows up on the main picker without a manual rooms.json
+ * edit. Only events `evaluateDiscoveredEvent` finds eligible for
+ * `targetDate` are included (see its doc comment for what changed and why).
  *
  * Some adult events share this same grouping (childcare offered alongside an
  * adult program, e.g. a leaders' meeting) -- confirmed live, a known and
@@ -698,25 +721,70 @@ export function evaluateDiscoveredEvent(
  * matching by name or keyword would just be a different kind of guessing.
  */
 export async function discoverChildrensMinistryRooms(
-  targetDate: string | null,
+  targetDate: string,
   excludeIds: Set<string>,
 ): Promise<DiscoveredRoom[]> {
   const events = await fetchAllEventProfiles();
   const groupingId = childrensMinistryGroupingId();
 
-  if (targetDate === null) {
-    return events
-      .filter((e) => {
-        const id = String(e?.['@_id'] ?? e?.id ?? '');
-        return id && !excludeIds.has(id) && String(e?.event_grouping?.['@_id'] ?? '') === groupingId;
-      })
-      .map((e) => ({ id: String(e['@_id'] ?? e.id), name: nodeText(e?.name) || `Event ${e['@_id'] ?? e.id}` }));
-  }
-
   return events
     .map((e) => evaluateDiscoveredEvent(e, targetDate, excludeIds, groupingId))
     .filter((d) => d.eligible)
     .map((d) => ({ id: d.id, name: d.name }));
+}
+
+export type DiscoveredRoomEntry = { id: string; name: string; isToday: boolean };
+
+async function eventHasCheckInsToday(eventId: string, today: string): Promise<boolean> {
+  const occs = await occurrencesForToday(eventId, today);
+  for (const occ of occs) {
+    const r = await fetchRoster(eventId, occ);
+    if (!isError(r) && r.count > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Everything for the "Weekday & Special Events" folder on the `?all=1` page
+ * (shown below the pinned Sunday rooms): every discovered Children's
+ * Ministry event, listed persistently regardless of today -- a recurring
+ * one (daily or weekly) is an ongoing program worth seeing any day, tagged
+ * `isToday` only when it actually applies; a ONE-TIME Children's Ministry
+ * event only shows on its own day, so a past one-off like "Lunch with the
+ * Pastors" does not clutter the folder forever -- PLUS any OTHER event, any
+ * grouping, that is both scheduled today by its own start_date/recurrence
+ * AND has a real check-in recorded today (an ad hoc test/special check-in
+ * event, e.g. Wayne's test events 159/160, grouping "Regular Events" not
+ * Children's Ministry). `isToday` drives the "Today" tag, sort order, and
+ * whether the folder auto-expands.
+ */
+export async function discoverExtraRooms(excludeIds: Set<string>): Promise<DiscoveredRoomEntry[]> {
+  const today = currentChurchDate();
+  const events = await fetchAllEventProfiles();
+  const groupingId = childrensMinistryGroupingId();
+  const found: DiscoveredRoomEntry[] = [];
+
+  for (const e of events) {
+    const id = String(e?.['@_id'] ?? e?.id ?? '');
+    if (!id || excludeIds.has(id)) continue;
+
+    const gid = String(e?.event_grouping?.['@_id'] ?? '');
+    const name = nodeText(e?.name) || `Event ${id}`;
+    const dateInfo = evaluateDateEligibility(e, today);
+    const isToday = dateInfo.eligible;
+
+    if (gid === groupingId) {
+      if (recurrenceKind(dateInfo.recurrenceDescription) === 'none' && !isToday) continue;
+      found.push({ id, name, isToday });
+      continue;
+    }
+
+    if (!isToday) continue;
+    if (!(await eventHasCheckInsToday(id, today))) continue;
+    found.push({ id, name, isToday });
+  }
+
+  return found;
 }
 
 /**
@@ -1184,7 +1252,16 @@ async function getSingleRoster(eventId: string, occ: string, explicit: boolean):
   if (!oks.length) {
     return (fetched.find((r) => isError(r)) as RosterError) ?? { error: 'ChMS returned an error.' };
   }
-  const data = oks.length === 1 ? oks[0] : mergeRosters(oks, occ);
+  // These are all the SAME event id, just different occurrence-time guesses
+  // (see occurrencesForToday above), unlike mergeRosters' other caller
+  // (getRoster, combining genuinely different event ids for a combined
+  // room), where blanking the name is correct since there is no single true
+  // name. Here there is one, so it is restored after merging: whichever
+  // guess actually had data reports the event's real <name>, which a
+  // one-off/ad hoc event (with no rooms.json entry to fall back on) has no
+  // other way to show.
+  const data =
+    oks.length === 1 ? oks[0] : { ...mergeRosters(oks, occ), room: oks.find((r) => r.room)?.room ?? '' };
 
   await enrichWithGuardians(data);
   // Guard against unbounded growth in a long-lived warm instance.

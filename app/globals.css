@@ -480,6 +480,73 @@ a {
   color: var(--gold);
 }
 
+/* ---- ?all=1: Sunday section + Weekday & Special Events folder ---------- */
+.picker-section {
+  width: 100%;
+  max-width: 960px;
+  margin-top: 36px;
+}
+.section-heading {
+  font-family: 'Lora', Georgia, serif;
+  font-weight: 600;
+  font-size: 19px;
+  color: var(--muted);
+  margin: 0 0 14px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+.picker-folder {
+  width: 100%;
+  max-width: 960px;
+  margin-top: 36px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+.picker-folder summary {
+  cursor: pointer;
+  font-family: 'Lora', Georgia, serif;
+  font-weight: 600;
+  font-size: 19px;
+  color: var(--muted);
+  margin-bottom: 14px;
+  -webkit-tap-highlight-color: transparent;
+  list-style: none;
+}
+.picker-folder summary::-webkit-details-marker {
+  display: none;
+}
+.picker-folder summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--gold);
+  transition: transform 0.14s ease;
+}
+.picker-folder[open] summary::before {
+  transform: rotate(90deg);
+}
+.picker-folder summary:hover,
+.picker-folder summary:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+.picker-folder .room-grid {
+  margin-top: 14px;
+}
+.today-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(208, 176, 96, 0.16);
+  color: var(--gold-bright);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
 /* ---- Animations --------------------------------------------------------- */
 @keyframes pop {
   from {
