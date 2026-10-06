@@ -98,9 +98,11 @@ page exactly as-is. `/?all=1` is a SEPARATE, richer page (see below), not a
   display for delivery confirmation; returns ONLY `{found, status, delivered,
   failed, optedOut, reason}`, never Clearstream's raw contact data.
 - `app/room/[room]/page.tsx`, `components/RoomBoard.tsx` — the display (auto
-  refresh 20s, "Text parent" button, "Rooms" back link, auto-reload on deploy,
-  a date picker in the footer to look up a different day — picking one pauses
-  polling and hides paging, "Back to today" restores live mode).
+  refresh 20s, "Text parent" button, "Picked up" button + collapsed "Picked
+  up" folder (see checkout section below), "Rooms" back link, auto-reload on
+  deploy, a date picker in the footer to look up a different day — picking
+  one pauses polling and hides paging AND checkout, "Back to today" restores
+  live mode).
 - `app/page.tsx` room picker, `app/error.tsx` boundary, `app/globals.css`
   (CFC navy/gold, Lato/Lora fonts). `reference/apps-script/` is the old prototype.
 
@@ -455,6 +457,55 @@ directly (`buildMessage never sends a blank room`).
 confirm both the live header and a real "Text parent" send now name the
 real room, never blank.
 
-## Coordination
-User switches between separate Claude accounts to save tokens, never two at
+## Added: end-of-class checkout, "Picked up" button (2026-10-06)
+Wayne asked for a way to track kids being picked up at the end of class, a
+button for the teacher. Scoped down from the first ask during this build:
+
+**Shipped now**: a green "Picked up" button next to "Text parent" on every
+checked-in child in `components/RoomBoard.tsx`. Tapping it moves that child
+out of the main grid into a collapsed "Picked up (N)" folder (same
+`<details>`/`▸` pattern as the room picker's "Weekday & Special Events"
+folder, collapsed by default to actually declutter the screen), each row
+showing the pickup time and an "Undo" button, no confirmation modal (it's a
+one-tap, easily-undone action, unlike texting). When every checked-in child
+has been picked up, the main area shows a distinct "Everyone's been picked
+up" state rather than the misleading "No kids checked in" wording. Hidden
+entirely in history view (`viewingHistory`), same as paging.
+
+**Storage: deliberately this-device-only, no backend.** State is
+`childId -> ISO pickup time`, kept in that iPad's own `localStorage` (key
+`kidcheck.pickedUp.<roomId>.<date>`, scoped to the day so it resets itself
+each morning without needing any pruning logic), not sent to CCB or any
+server. Every read/write is try/caught (private browsing, full/blocked
+storage should never break the display). Confirmed live-browser-tested
+(mocked roster, real component code): marking, undo, the "everyone picked
+up" state, persistence across a full page reload, and correct hiding in
+history view all work. Each room's iPad is a single dedicated device per
+this app's whole design, so per-device storage is a reasonable fit, not a
+corner cut blindly.
+
+**Deferred, not forgotten: calendar-year persisted history.** Wayne also
+wants pickup history retained for the year (e.g. for later lookup), which
+needs real server-side storage -- this app has had zero persistence of any
+kind until now (every screen is derived live from CCB or Clearstream on each
+request). Attempted to provision one this round: this account's Supabase
+org (`im4flight-cmd's Org`) is already at its free-tier 2-project cap
+(existing projects "ShepherdIQ" and "speakset", unrelated to KidCheck) --
+`create_project` fails with that limit. Asked Wayne how to proceed (share
+one of those two projects' database, free a slot, or pay to upgrade); he
+does not want to spend money right now and said to skip the persistence
+part for now, mid-meeting. **So**: nothing was built against Supabase or any
+other database. The localStorage version above is the complete, final
+scope for this round, not a stopgap half of a bigger change in flight.
+
+**When Wayne wants to revisit persisted history**: the real options are (1)
+a free Supabase project in a DIFFERENT org/account (sidesteps the 2-project
+cap on this one entirely, zero cost), (2) share a table inside ShepherdIQ or
+speakset if he's fine co-locating, or (3) any other small Postgres/KV
+provider. Whichever he picks, the shape is small and already thought
+through: one row per pickup (room id + name snapshot, child id, occurrence,
+picked-up-at timestamp), a tiny new API route or two, and the EXISTING
+date-picker history view in RoomBoard.tsx is the natural place to surface
+it (it already has a read-only past-day view; past-day pickups would just
+be more data on that same screen), rather than a whole new report page.
 once. Always push so the next account is current. Be concise to stretch tokens.

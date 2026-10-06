@@ -75,6 +75,43 @@ function endSentence(s: string): string {
   return /[.!?]$/.test(s) ? s : `${s}.`;
 }
 
+// "Picked up" tracking is deliberately this-device-only for now (no backend,
+// no sync to CCB or other rooms' iPads): a teacher's own tap, remembered in
+// that iPad's browser storage and keyed by day, so a page reload during the
+// chaotic end-of-class window doesn't lose it, but a new day always starts
+// clear. Every read/write is try/caught: private browsing or a cleared/full
+// storage should never break the display, just mean this session's picks
+// don't survive a reload.
+function pickupStorageKey(roomId: string, occurrence: string): string {
+  return `kidcheck.pickedUp.${roomId}.${occurrence.slice(0, 10)}`;
+}
+
+function loadPickedUp(key: string): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePickedUp(key: string, data: Record<string, string>) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(data));
+  } catch {
+    // Storage blocked or full: this tap just won't survive a reload.
+  }
+}
+
+function formatPickupTime(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 export default function RoomBoard({
   roomId,
   initialName,
@@ -125,6 +162,15 @@ export default function RoomBoard({
       mountedRef.current = false;
     };
   }, []);
+
+  // Checkout state: childId -> ISO time picked up. Reloaded whenever the
+  // live occurrence changes (i.e. a new day), so it never carries over.
+  // Not used in history view -- picked-up only ever applies to the live day.
+  const [pickedUp, setPickedUp] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (viewingHistory || !roster?.occurrence) return;
+    setPickedUp(loadPickedUp(pickupStorageKey(roomId, roster.occurrence)));
+  }, [roomId, roster?.occurrence, viewingHistory]);
 
   const load = useCallback(async () => {
     if (inFlight.current) return; // never let polls stack up
@@ -192,9 +238,36 @@ export default function RoomBoard({
   const notConfigured = statusCode === 'not_configured';
   const stale = status !== '' && !notConfigured;
 
+  // Marking pickup makes no sense looking at a bygone day, so history view
+  // shows the full roster unfiltered, same as before this feature existed.
+  const canCheckOut = !viewingHistory;
+  const stillHere = canCheckOut ? people.filter((p) => !pickedUp[p.id]) : people;
+  const pickedUpList = canCheckOut ? people.filter((p) => pickedUp[p.id]) : [];
+
   function openPage(p: Attendee) {
     setPageError('');
     setPageTarget(p);
+  }
+
+  function markPickedUp(childId: string) {
+    if (!roster?.occurrence) return;
+    const key = pickupStorageKey(roomId, roster.occurrence);
+    setPickedUp((prev) => {
+      const next = { ...prev, [childId]: new Date().toISOString() };
+      savePickedUp(key, next);
+      return next;
+    });
+  }
+
+  function undoPickedUp(childId: string) {
+    if (!roster?.occurrence) return;
+    const key = pickupStorageKey(roomId, roster.occurrence);
+    setPickedUp((prev) => {
+      const next = { ...prev };
+      delete next[childId];
+      savePickedUp(key, next);
+      return next;
+    });
   }
 
   // Polls our own sanitized /api/page/status endpoint (never Clearstream
@@ -310,9 +383,9 @@ export default function RoomBoard({
           <div className="state">
             <div className="state-text">Loading&hellip;</div>
           </div>
-        ) : people.length > 0 ? (
-          <ul className={canPage ? 'roster has-paging' : 'roster'}>
-            {people.map((p) => (
+        ) : stillHere.length > 0 ? (
+          <ul className={canPage || canCheckOut ? 'roster has-paging' : 'roster'}>
+            {stillHere.map((p) => (
               <li className="person" key={p.id || p.name}>
                 <span className="avatar" aria-hidden="true">
                   {initialOf(p.name)}
@@ -327,18 +400,40 @@ export default function RoomBoard({
                     </span>
                   )}
                 </span>
-                {canPage && (
-                  <button
-                    className="page-btn"
-                    onClick={() => openPage(p)}
-                    aria-label={`Text ${p.name}'s parent`}
-                  >
-                    Text parent
-                  </button>
+                {(canPage || canCheckOut) && (
+                  <span className="person-actions">
+                    {canPage && (
+                      <button
+                        className="page-btn"
+                        onClick={() => openPage(p)}
+                        aria-label={`Text ${p.name}'s parent`}
+                      >
+                        Text parent
+                      </button>
+                    )}
+                    {canCheckOut && (
+                      <button
+                        className="pickup-btn"
+                        onClick={() => markPickedUp(p.id)}
+                        aria-label={`Mark ${p.name} picked up`}
+                      >
+                        Picked up
+                      </button>
+                    )}
+                  </span>
                 )}
               </li>
             ))}
           </ul>
+        ) : people.length > 0 ? (
+          <div className="state">
+            <CheckMark />
+            <div className="state-text">Everyone&rsquo;s been picked up</div>
+            <div className="state-sub">
+              All {people.length} checked-in {people.length === 1 ? 'child has' : 'children have'} been
+              marked picked up.
+            </div>
+          </div>
         ) : roster ? (
           <div className="state">
             <CheckMark />
@@ -366,6 +461,27 @@ export default function RoomBoard({
             <div className="state-text">Cannot load the roster</div>
             <div className="state-sub">{status || 'Trying again shortly.'}</div>
           </div>
+        )}
+
+        {pickedUpList.length > 0 && (
+          <details className="pickedup-folder">
+            <summary>Picked up ({pickedUpList.length})</summary>
+            <ul className="pickedup-list">
+              {pickedUpList.map((p) => (
+                <li className="pickedup-row" key={p.id || p.name}>
+                  <span className="pickedup-name">{p.name}</span>
+                  <span className="pickedup-time">{formatPickupTime(pickedUp[p.id])}</span>
+                  <button
+                    className="pickedup-undo"
+                    onClick={() => undoPickedUp(p.id)}
+                    aria-label={`Undo picked up for ${p.name}`}
+                  >
+                    Undo
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
         )}
       </main>
 
