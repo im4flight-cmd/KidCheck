@@ -105,6 +105,20 @@ page exactly as-is. `/?all=1` is a SEPARATE, richer page (see below), not a
   live mode).
 - `app/page.tsx` room picker, `app/error.tsx` boundary, `app/globals.css`
   (CFC navy/gold, Lato/Lora fonts). `reference/apps-script/` is the old prototype.
+- `public/icons/*.png` — the PWA/home-screen app icon (referenced from
+  `app/layout.tsx` and `app/manifest.ts`). Replaced 2026-10-06 with Wayne's
+  own supplied artwork (blue play-button + checkmark on a colorful
+  watercolor background), generated at all 5 required sizes with `sharp`
+  (one-off, not added as a project dependency -- `scripts/gen-icons.mjs`
+  still exists but is now stale, it builds icons from the CFC wordmark logo
+  in `public/brand/`, unrelated to this new artwork; don't run it expecting
+  it to touch these). The maskable variant (`icon-512-maskable.png`) is the
+  same art shrunk to ~80% with white padding so Android's adaptive-icon
+  crop doesn't cut into the checkmark. **iOS caveat**: an iPad that already
+  has this added to its home screen won't pick up the new icon automatically
+  (iOS doesn't re-fetch a PWA's home-screen icon on its own) -- remove and
+  re-add it there to see the change. The live site itself (browser tab,
+  fresh installs) updates immediately on deploy, no action needed.
 
 ## Known behavior, not bugs
 - As of 2026-09-22, an occurrence CCB actually has scheduled for today (any
